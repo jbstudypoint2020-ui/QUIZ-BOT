@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, PollAnswerHandler, ContextTypes
 
-TOKEN = "5096262921:AAFHINLj8SvFdPOQEJLVUV-13OTklEY6h0"
+TOKEN = "5096262921:AAEhBO0LSfPowL0PAhui01I2jC0rcIA4M-w"
 
 QUESTIONS = [
     {
