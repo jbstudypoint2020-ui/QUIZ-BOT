@@ -19,7 +19,7 @@ from telegram.ext import (
     ConversationHandler
 )
 
-TOKEN = "5096262921:AAFHINLj8SvFdPOQEJLVUV-13OTklEY6h0"
+TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
 BOT_USERNAME = "JBSTUDYPOINT_BOT"  # अपने बॉट का यूज़रनेम (बिना @ के)
 ADMIN_ID = 1141231956
 
