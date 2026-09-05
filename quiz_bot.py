@@ -24,7 +24,7 @@ from telegram.ext import (
     ContextTypes
 )
 
-# Keep-Alive Server for Render
+# Render Keep-Alive Server
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -39,7 +39,7 @@ def run_dummy_server():
 TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
 ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
-DEFAULT_CREATOR = "Dr. Dev Kumar | JB STUDY POINT"
+DEFAULT_CREATOR = "JB STUDY POINT"
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_PATH = os.path.join(CURRENT_DIR, "hindi.ttf")
@@ -67,142 +67,230 @@ def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 def clean_question_text(raw_text):
-    # पोल में आने वाले [117/200] या 1. जैसे पुराने नंबर हटाना
     text = re.sub(r"^\s*\[\d+/\d+\]\s*", "", raw_text)
     text = re.sub(r"^\s*(Q|q)?\d+[\.\)\-:]\s*", "", text)
     return text.strip()
 
-# प्रीमियम कलरफुल व अंतिम पेज Answer Key वाली PDF
+# 2-Column Professional Exam Booklet Generator
 def generate_pdf_bytes(quiz_data):
-    title = str(quiz_data.get('title', 'इतिहास टेस्ट'))
+    PAGE_W = 1240
+    PAGE_H = 1754
+    MARGIN_X = 50
+    MARGIN_Y = 40
+    COL_GAP = 30
+    COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
+
+    # Fonts
+    f_brand = ImageFont.truetype(FONT_PATH, 24)
+    f_sub = ImageFont.truetype(FONT_PATH, 13)
+    f_title = ImageFont.truetype(FONT_PATH, 22)
+    f_tbl_head = ImageFont.truetype(FONT_PATH, 11)
+    f_tbl_val = ImageFont.truetype(FONT_PATH, 12)
+    f_inst_title = ImageFont.truetype(FONT_PATH, 12)
+    f_inst = ImageFont.truetype(FONT_PATH, 11)
+    f_bar = ImageFont.truetype(FONT_PATH, 13)
+    f_q = ImageFont.truetype(FONT_PATH, 14)
+    f_opt = ImageFont.truetype(FONT_PATH, 13)
+    f_ans_title = ImageFont.truetype(FONT_PATH, 24)
+    f_key = ImageFont.truetype(FONT_PATH, 15)
+
+    title = str(quiz_data.get('title', 'MOCK TEST'))
     creator = str(quiz_data.get('creator', DEFAULT_CREATOR))
     questions = quiz_data.get('questions', [])
-
-    PAGE_WIDTH = 1240
-    PAGE_HEIGHT = 1754
-    MARGIN = 65
-    CONTENT_WIDTH = PAGE_WIDTH - (2 * MARGIN)
-    BG_COLOR = "#F8FAFC"  # प्रीमियम हल्का बैकग्राउंड
-
-    font_title = ImageFont.truetype(FONT_PATH, 38)
-    font_meta = ImageFont.truetype(FONT_PATH, 23)
-    font_q = ImageFont.truetype(FONT_PATH, 26)
-    font_opt = ImageFont.truetype(FONT_PATH, 23)
-    font_ans_title = ImageFont.truetype(FONT_PATH, 32)
-    font_key = ImageFont.truetype(FONT_PATH, 22)
+    total_q = len(questions)
 
     def wrap_text(text, font, max_w, draw):
         words = text.split()
         lines = []
-        cur_line = ""
-        for word in words:
-            test = f"{cur_line} {word}".strip()
+        cur = ""
+        for w in words:
+            test = f"{cur} {w}".strip()
             bbox = draw.textbbox((0, 0), test, font=font)
             if (bbox[2] - bbox[0]) <= max_w:
-                cur_line = test
+                cur = test
             else:
-                if cur_line:
-                    lines.append(cur_line)
-                cur_line = word
-        if cur_line:
-            lines.append(cur_line)
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
         return lines
 
     pages = []
 
-    def new_page():
-        img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), BG_COLOR)
-        return img, ImageDraw.Draw(img)
+    def create_new_page(is_first=False):
+        img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
+        draw = ImageDraw.Draw(img)
 
-    cur_img, cur_draw = new_page()
-    y = MARGIN
+        # Running Header
+        draw.text((MARGIN_X, 22), f"{creator.upper()} — MOCK TEST SERIES", font=f_sub, fill="#777777")
+        draw.text((PAGE_W - MARGIN_X - 220, 22), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#777777")
+        draw.line([(MARGIN_X, 36), (PAGE_W - MARGIN_X, 36)], fill="#DDDDDD", width=1)
 
-    # Top Header
-    t_bbox = cur_draw.textbbox((0, 0), title, font=font_title)
-    cur_draw.text(((PAGE_WIDTH - (t_bbox[2] - t_bbox[0])) // 2, y), title, font=font_title, fill="#0D47A1")
-    y += 52
+        y_offset = MARGIN_Y + 10
 
-    meta = f"Creator: {creator}  |  Total Questions: {len(questions)}  |  Timer: 20s"
-    m_bbox = cur_draw.textbbox((0, 0), meta, font=font_meta)
-    cur_draw.text(((PAGE_WIDTH - (m_bbox[2] - m_bbox[0])) // 2, y), meta, font=font_meta, fill="#546E7A")
-    y += 42
-    cur_draw.line([(MARGIN, y), (PAGE_WIDTH - MARGIN, y)], fill="#0D47A1", width=3)
-    y += 30
+        if is_first:
+            # Logo / Brand Area
+            draw.ellipse([MARGIN_X, y_offset, MARGIN_X + 48, y_offset + 48], outline="#8B0000", width=2)
+            draw.text((MARGIN_X + 11, y_offset + 12), "JB", font=f_brand, fill="#8B0000")
+            draw.text((MARGIN_X + 58, y_offset + 5), creator, font=f_brand, fill="#111111")
+            draw.text((MARGIN_X + 60, y_offset + 32), "TEST SERIES & ACADEMIC CELL", font=f_sub, fill="#666666")
+            draw.line([(MARGIN_X, y_offset + 54), (PAGE_W - MARGIN_X, y_offset + 54)], fill="#8B0000", width=2)
+            y_offset += 65
 
-    opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
+            # Mock Test Box Header
+            t_bbox = draw.textbbox((0, 0), title.upper(), font=f_title)
+            draw.text(((PAGE_W - (t_bbox[2] - t_bbox[0])) // 2, y_offset), title.upper(), font=f_title, fill="#000000")
+            y_offset += 30
+
+            sub_b = draw.textbbox((0, 0), "Paper - II : History / History Practice Paper", font=f_sub)
+            draw.text(((PAGE_W - (sub_b[2] - sub_b[0])) // 2, y_offset), "Paper - II : History / History Practice Paper", font=f_sub, fill="#555555")
+            y_offset += 25
+
+            # Table Box
+            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 75], outline="#333333", width=1)
+            draw.line([(MARGIN_X + 220, y_offset), (MARGIN_X + 220, y_offset + 75)], fill="#333333", width=1)
+            draw.line([(PAGE_W - MARGIN_X - 320, y_offset), (PAGE_W - MARGIN_X - 320, y_offset + 75)], fill="#333333", width=1)
+            draw.line([(MARGIN_X, y_offset + 45), (PAGE_W - MARGIN_X, y_offset + 45)], fill="#333333", width=1)
+
+            # Table Cell 1
+            draw.text((MARGIN_X + 10, y_offset + 6), "TEST NO.", font=f_tbl_head, fill="#444444")
+            draw.text((MARGIN_X + 10, y_offset + 22), "01", font=f_tbl_val, fill="#000000")
+
+            # Table Cell 2 (Roll No Box)
+            draw.text((MARGIN_X + 230, y_offset + 6), "ROLL NO.", font=f_tbl_head, fill="#444444")
+            rx = MARGIN_X + 230
+            for _ in range(8):
+                draw.rectangle([rx, y_offset + 20, rx + 16, y_offset + 38], outline="#666666", width=1)
+                rx += 20
+
+            # Table Cell 3 (Booklet Series)
+            draw.text((PAGE_W - MARGIN_X - 310, y_offset + 6), "BOOKLET SERIES", font=f_tbl_head, fill="#444444")
+            bx = PAGE_W - MARGIN_X - 310
+            for char, active in [("A", True), ("B", False), ("C", False), ("D", False)]:
+                if active:
+                    draw.ellipse([bx, y_offset + 22, bx + 16, y_offset + 38], fill="#8B0000")
+                    draw.text((bx + 4, y_offset + 23), char, font=f_tbl_val, fill="#FFFFFF")
+                else:
+                    draw.ellipse([bx, y_offset + 22, bx + 16, y_offset + 38], outline="#666666", width=1)
+                    draw.text((bx + 4, y_offset + 23), char, font=f_tbl_val, fill="#000000")
+                bx += 24
+
+            # Table Bottom Row
+            draw.text((MARGIN_X + 10, y_offset + 52), "Time: 2 Hours", font=f_tbl_val, fill="#111111")
+            draw.text((MARGIN_X + 230, y_offset + 52), f"Total Questions: {total_q}", font=f_tbl_val, fill="#111111")
+            draw.text((PAGE_W - MARGIN_X - 310, y_offset + 52), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
+            y_offset += 85
+
+            # Instructions Box
+            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 95], outline="#CCCCCC", width=1)
+            draw.text((MARGIN_X + 20, y_offset + 8), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
+            draw.text((MARGIN_X + 20, y_offset + 26), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
+            draw.text((MARGIN_X + 20, y_offset + 42), "2. ओएमआर उत्तर पत्रक पर केवल नीले/काले बॉल-पॉइंट पेन से गोलों को पूर्ण रूप से गहरा करें।", font=f_inst, fill="#333333")
+            draw.text((MARGIN_X + 20, y_offset + 58), "3. परीक्षा कक्ष में मोबाइल फोन या किसी भी इलेक्ट्रॉनिक उपकरण का प्रयोग वर्जित है।", font=f_inst, fill="#333333")
+            draw.text((MARGIN_X + 20, y_offset + 74), "4. उत्तर कुंजी एवं स्व-मूल्यांकन तालिका अंतिम पृष्ठ पर प्रदान की गई है।", font=f_inst, fill="#333333")
+            y_offset += 105
+
+            # Ribbon Banner
+            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 26], fill="#8B0000")
+            r_box = draw.textbbox((0, 0), "GENERAL PAPER & SUBJECT SECTION", font=f_bar)
+            draw.text(((PAGE_W - (r_box[2] - r_box[0])) // 2, y_offset + 6), "GENERAL PAPER & SUBJECT SECTION", font=f_bar, fill="#FFFFFF")
+            y_offset += 36
+        else:
+            y_offset = 60
+
+        return img, draw, y_offset
+
+    cur_img, cur_draw, start_y = create_new_page(is_first=True)
+    cur_col = 0
+    cur_y = start_y
+    col_tops = [start_y, start_y]
+
+    opt_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
     answer_keys = []
 
     for i, q in enumerate(questions, 1):
         clean_q = clean_question_text(q.get('question', ''))
-        q_lines = wrap_text(f"Q{i}. {clean_q}", font_q, CONTENT_WIDTH, cur_draw)
+        q_lines = wrap_text(f"{i}. {clean_q}", f_q, COL_W, cur_draw)
 
-        opt_lines_list = []
+        opt_items = []
         for o_idx, opt in enumerate(q.get('options', [])):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            # विकल्प से पहले के डुप्लिकेट A/B/C हटाना
-            cleaned_opt = re.sub(r"^\s*[A-Ha-h1-9][\.\)\-:]\s*", "", opt)
-            wrapped = wrap_text(f"{lbl} {cleaned_opt}", font_opt, CONTENT_WIDTH - 40, cur_draw)
-            opt_lines_list.append(wrapped)
+            c_opt = re.sub(r"^\s*[A-Ha-h1-9][\.\)\-:]\s*", "", opt)
+            wrapped = wrap_text(f"{lbl} {c_opt}", f_opt, COL_W - 15, cur_draw)
+            opt_items.append(wrapped)
 
         correct_idx = q.get('correct_id', 0)
-        corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
-        answer_keys.append((f"Q{i}", corr_lbl))
+        c_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
+        answer_keys.append((f"{i}", c_lbl))
 
-        total_opt_lines = sum(len(l) for l in opt_lines_list)
-        needed_height = (len(q_lines) * 38) + (total_opt_lines * 34) + 26
+        tot_opt_lines = sum(len(x) for x in opt_items)
+        block_h = (len(q_lines) * 22) + (tot_opt_lines * 19) + 14
 
-        if y + needed_height > (PAGE_HEIGHT - MARGIN):
-            pages.append(cur_img)
-            cur_img, cur_draw = new_page()
-            y = MARGIN
+        # Page / Column Overflow check
+        if cur_y + block_h > (PAGE_H - MARGIN_Y):
+            if cur_col == 0:
+                cur_col = 1
+                cur_y = col_tops[1]
+            else:
+                pages.append(cur_img)
+                cur_img, cur_draw, start_y = create_new_page(is_first=False)
+                cur_col = 0
+                col_tops = [start_y, start_y]
+                cur_y = start_y
 
-        # रंगीन प्रश्न (Indigo / Royal Blue)
+        col_x = MARGIN_X if cur_col == 0 else MARGIN_X + COL_W + COL_GAP
+
+        # Render Question Text (Bold/Black)
         for line in q_lines:
-            cur_draw.text((MARGIN, y), line, font=font_q, fill="#1A237E")
-            y += 38
+            cur_draw.text((col_x, cur_y), line, font=f_q, fill="#000000")
+            cur_y += 22
 
-        # रंगीन विकल्प (Dark Slate)
-        for item_lines in opt_lines_list:
-            for line in item_lines:
-                cur_draw.text((MARGIN + 32, y), line, font=font_opt, fill="#263238")
-                y += 34
+        # Render Options
+        for item in opt_items:
+            for line in item:
+                cur_draw.text((col_x + 12, cur_y), line, font=f_opt, fill="#222222")
+                cur_y += 19
 
-        y += 20
+        cur_y += 10
 
     pages.append(cur_img)
 
-    # ----------------- अंतिम पेज: ANSWER KEY -----------------
-    ans_img, ans_draw = new_page()
-    ay = MARGIN + 20
+    # ----------------- Last Page: Professional Answer Key -----------------
+    ans_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
+    ans_draw = ImageDraw.Draw(ans_img)
 
-    ans_title = "— उत्तर तालिका (ANSWER KEY) —"
-    abbox = ans_draw.textbbox((0, 0), ans_title, font=font_ans_title)
-    ans_draw.text(((PAGE_WIDTH - (abbox[2] - abbox[0])) // 2, ay), ans_title, font=font_ans_title, fill="#B71C1C")
-    ay += 55
+    # Header
+    ans_draw.text((MARGIN_X, 22), f"{creator.upper()} — ANSWER KEY & EVALUATION", font=f_sub, fill="#777777")
+    ans_draw.line([(MARGIN_X, 36), (PAGE_W - MARGIN_X, 36)], fill="#8B0000", width=2)
 
-    sub = f"परीक्षा: {title}  |  कुल प्रश्न: {len(questions)}"
-    sbbox = ans_draw.textbbox((0, 0), sub, font=font_meta)
-    ans_draw.text(((PAGE_WIDTH - (sbbox[2] - sbbox[0])) // 2, ay), sub, font=font_meta, fill="#546E7A")
+    ay = 60
+    t_box = ans_draw.textbbox((0, 0), "ANSWER KEY / उत्तर तालिका", font=f_ans_title)
+    ans_draw.text(((PAGE_W - (t_box[2] - t_box[0])) // 2, ay), "ANSWER KEY / उत्तर तालिका", font=f_ans_title, fill="#8B0000")
     ay += 40
-    ans_draw.line([(MARGIN + 80, ay), (PAGE_WIDTH - MARGIN - 80, ay)], fill="#B71C1C", width=2)
-    ay += 45
 
-    # 4-कॉलम सुंदर ग्रिड
-    cols = 4
-    col_w = (CONTENT_WIDTH - 60) // cols
-    start_x = MARGIN + 30
-    grid_y = ay
+    sub_txt = f"{title}  |  Total Questions: {len(questions)}  |  Booklet Series: A"
+    s_box = ans_draw.textbbox((0, 0), sub_txt, font=f_sub)
+    ans_draw.text(((PAGE_W - (s_box[2] - s_box[0])) // 2, ay), sub_txt, font=f_sub, fill="#555555")
+    ay += 35
+    ans_draw.line([(MARGIN_X + 100, ay), (PAGE_W - MARGIN_X - 100, ay)], fill="#8B0000", width=1)
+    ay += 35
+
+    # 5-Column Grid Matrix
+    cols = 5
+    usable_w = PAGE_W - (2 * MARGIN_X) - 40
+    cw = usable_w // cols
+    sx = MARGIN_X + 20
 
     for idx, (qn, ans) in enumerate(answer_keys):
         c = idx % cols
         r = idx // cols
-        item_x = start_x + (c * col_w)
-        item_y = grid_y + (r * 42)
+        ix = sx + (c * cw)
+        iy = ay + (r * 34)
 
-        # प्रत्येक बॉक्स कार्ड
-        ans_draw.rectangle([item_x, item_y, item_x + col_w - 20, item_y + 36], fill="#FFFFFF", outline="#CFD8DC", width=1)
-        ans_draw.text((item_x + 12, item_y + 6), f"{qn}:", font=font_key, fill="#0D47A1")
-        ans_draw.text((item_x + 85, item_y + 6), f"{ans}", font=font_key, fill="#2E7D32")
+        ans_draw.rectangle([ix, iy, ix + cw - 15, iy + 28], outline="#CCCCCC", fill="#FDFDFD", width=1)
+        ans_draw.text((ix + 8, iy + 6), f"Q.{qn}", font=f_key, fill="#000000")
+        ans_draw.text((ix + cw - 45, iy + 6), ans, font=f_key, fill="#8B0000")
 
     pages.append(ans_img)
 
@@ -235,7 +323,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• नया क्विज़: `/create क्विज़ का नाम`\n"
         "• प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
         "• सभी क्विज़ देखें: `/myquizzes`\n"
-        "• PDF डाउनलोड करें: `/pdf QUIZ_ID`"
+        "• परीक्षा बुकलेट PDF डाउनलोड करें: `/pdf QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -367,7 +455,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         keyboard = [
             [InlineKeyboardButton("▶️ Start", callback_data=f"play_{q_id}")],
-            [InlineKeyboardButton("📄 Download PDF", callback_data=f"pdf_{q_id}")],
+            [InlineKeyboardButton("📄 Download Booklet PDF", callback_data=f"pdf_{q_id}")],
             [InlineKeyboardButton("➕ Add to Group", url=add_group_url)],
             [InlineKeyboardButton("📩 Share", url=share_url)],
             [
@@ -412,112 +500,12 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ रंगीन हिंदी पीडीएफ व उत्तर तालिका तैयार की जा रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ परीक्षा बुकलेट PDF तैयार की जा रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
-        safe_filename = f"{all_q[quiz_id].get('title', 'Quiz')}.pdf".replace(" ", "_")
+        safe_filename = f"{all_q[quiz_id].get('title', 'Exam_Paper')}_Booklet.pdf".replace(" ", "_")
 
         await context.bot.send_document(
             chat_id=chat_id,
             document=pdf_buffer,
-            filename=safe_filename,
-            caption=f"📄 *{all_q[quiz_id]['title']}*\n👤 Creator: {all_q[quiz_id].get('creator', DEFAULT_CREATOR)}\n🆔 ID: `{quiz_id}`\n📌 *उत्तर तालिका अंतिम पेज पर है।*",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ PDF त्रुटि: {str(e)}")
-
-async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें।")
-        return
-    quiz_id = context.args[0].strip().upper()
-    await start_quiz_session(update.effective_chat.id, update.effective_user.id, quiz_id, context)
-
-async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data.startswith("play_"):
-        quiz_id = data.replace("play_", "")
-        await start_quiz_session(query.message.chat_id, query.from_user.id, quiz_id, context)
-    elif data.startswith("pdf_"):
-        quiz_id = data.replace("pdf_", "")
-        await send_quiz_pdf(query.message.chat_id, quiz_id, context)
-
-async def start_quiz_session(chat_id, user_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
-    all_q = get_all_quizzes()
-    if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं हैं।")
-        return
-
-    user_states[user_id] = {
-        "quiz_id": quiz_id,
-        "index": 0,
-        "score": 0,
-        "chat_id": chat_id
-    }
-    await send_quiz_poll(user_id, context)
-
-async def send_quiz_poll(user_id, context: ContextTypes.DEFAULT_TYPE):
-    state = user_states[user_id]
-    all_q = get_all_quizzes()
-    quiz = all_q[state["quiz_id"]]
-    idx = state["index"]
-
-    if idx < len(quiz["questions"]):
-        q = quiz["questions"][idx]
-        msg = await context.bot.send_poll(
-            chat_id=state["chat_id"],
-            question=clean_question_text(q["question"]),
-            options=q["options"],
-            type="quiz",
-            correct_option_id=q["correct_id"],
-            is_anonymous=False,
-            explanation=""
-        )
-        context.bot_data[msg.poll.id] = (user_id, q["correct_id"])
-    else:
-        score = state["score"]
-        total = len(quiz["questions"])
-        await context.bot.send_message(
-            chat_id=state["chat_id"],
-            text=f"🏁 *टेस्ट समाप्त!*\n\n📝 क्विज़: *{quiz['title']}*\n👤 क्रिएटर: *{quiz.get('creator', DEFAULT_CREATOR)}*\n🏆 आपका स्कोर: *{score} / {total}*\n\nधन्यवाद!",
-            parse_mode="Markdown"
-        )
-
-async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    p_ans = update.poll_answer
-    poll_id = p_ans.poll_id
-
-    if poll_id in context.bot_data:
-        user_id, correct_id = context.bot_data[poll_id]
-        if user_id in user_states:
-            selected = p_ans.option_ids[0]
-            if selected == correct_id:
-                user_states[user_id]["score"] += 1
-
-            user_states[user_id]["index"] += 1
-            await send_quiz_poll(user_id, context)
-
-def main():
-    threading.Thread(target=run_dummy_server, daemon=True).start()
-    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("create", create_command))
-    app.add_handler(CommandHandler("done", done_command))
-    app.add_handler(CommandHandler("myquizzes", my_quizzes))
-    app.add_handler(CommandHandler("play", play_command))
-    app.add_handler(CommandHandler("pdf", pdf_command))
-    app.add_handler(MessageHandler(filters.POLL, handle_incoming_poll))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
-    app.add_handler(CallbackQueryHandler(button_click))
-    app.add_handler(PollAnswerHandler(handle_poll_answer))
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-    
+            filename=sa
