@@ -102,13 +102,13 @@ async def get_quiz_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_msg = (
         f"✅ क्विज़ *'{title}'* बन गया है!\n"
         f"🆔 ID: `{quiz_id}`\n\n"
-        "👉 अब **@QuizBot** से सीधे पोल/क्विज़ फ़ॉरवर्ड करें (एक साथ 10-20 भी फ़ॉरवर्ड कर सकते हैं)।\n\n"
-        "सारे प्रश्न फ़ॉरवर्ड करने के बाद **/done** भेजें।"
+        "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करें या टेक्स्ट में भेजें।\n\n"
+        "पूरा होने पर **/done** भेजें।"
     )
     await update.message.reply_text(help_msg, parse_mode="Markdown")
     return WAIT_QUESTION
 
-# फ़ॉरवर्ड किए गए पोल को पकड़ना
+# पोल फ़ॉरवर्ड हैंडलर
 async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_id = context.user_data.get("current_quiz_id")
     if not quiz_id or quiz_id not in QUIZZES:
@@ -133,7 +133,7 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(f"✅ {total_q} question(s) saved from polls! ➡️ Send more or /done")
     return WAIT_QUESTION
 
-# टेक्स्ट फॉर्मेट से प्रश्न जोड़ना
+# टेक्स्ट प्रश्न हैंडलर
 async def handle_incoming_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     quiz_id = context.user_data.get("current_quiz_id")
@@ -142,23 +142,27 @@ async def handle_incoming_text(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if "|" in text:
         parts = [p.strip() for p in text.split("|")]
-        if len(parts) == 6:
+        if len(parts) >= 3:
+            q_text = parts[0]
+            options = parts[1:-1]
             try:
-                c_num = int(parts[5])
-                q_data = {
-                    "question": parts[0],
-                    "options": parts[1:5],
-                    "correct_id": c_num - 1
-                }
-                QUIZZES[quiz_id]["questions"].append(q_data)
-                save_quizzes(QUIZZES)
-                total_q = len(QUIZZES[quiz_id]["questions"])
-                await update.message.reply_text(f"✅ प्रश्न #{total_q} जुड़ गया! और भेजें या /done भेजें।")
-                return WAIT_QUESTION
+                c_num = int(parts[-1])
+                correct_id = c_num - 1
             except Exception:
-                pass
+                correct_id = 0
 
-    await update.message.reply_text("ℹ️ कृपया @QuizBot से पोल फ़ॉरवर्ड करें या समाप्त करने के लिए /done भेजें।")
+            q_data = {
+                "question": q_text,
+                "options": options,
+                "correct_id": correct_id
+            }
+            QUIZZES[quiz_id]["questions"].append(q_data)
+            save_quizzes(QUIZZES)
+            total_q = len(QUIZZES[quiz_id]["questions"])
+            await update.message.reply_text(f"✅ प्रश्न #{total_q} जुड़ गया! और भेजें या /done भेजें।")
+            return WAIT_QUESTION
+
+    await update.message.reply_text("ℹ️ पोल फ़ॉरवर्ड करें या समाप्त करने के लिए /done भेजें।")
     return WAIT_QUESTION
 
 async def create_quiz_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
