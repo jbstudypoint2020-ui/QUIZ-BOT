@@ -3,7 +3,6 @@ import os
 import random
 import string
 import io
-import urllib.request
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from fpdf import FPDF
@@ -41,17 +40,10 @@ ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
 DEFAULT_CREATOR_NAME = "Dr. Dev Kumar | JB STUDY POINT"
 
-FONT_PATH = "FreeSerif.ttf"
+# फ़ाइल की सटीक लोकेशन
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+FONT_PATH = os.path.join(CURRENT_DIR, "hindi.ttf")
 
-def ensure_font_downloaded():
-    if not os.path.exists(FONT_PATH):
-        try:
-            url = "https://raw.githubusercontent.com/sensboston/sensboston.github.io/master/FreeSerif.ttf"
-            urllib.request.urlretrieve(url, FONT_PATH)
-        except Exception as e:
-            print(f"Font download error: {e}")
-
-# हमेशा ताज़ा डेटाबेस फ़ाइल से पढ़ेगा
 def get_all_quizzes():
     if os.path.exists(DB_FILE):
         try:
@@ -75,26 +67,26 @@ def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 def generate_pdf_bytes(quiz_data):
-    ensure_font_downloaded()
+    if not os.path.exists(FONT_PATH):
+        raise Exception(f"फ़ॉन्ट फ़ाइल 'hindi.ttf' सर्वर पर नहीं मिली। कृपया चेक करें कि फ़ाइल सही अपलोड हुई है।")
+
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    if os.path.exists(FONT_PATH):
-        pdf.add_font("HindiFont", "", FONT_PATH)
-        font_name = "HindiFont"
-    else:
-        font_name = "Helvetica"
+    # हिंदी फ़ॉन्ट जोड़ें
+    pdf.add_font("Devanagari", "", FONT_PATH)
+    pdf.set_font("Devanagari", size=16)
 
-    title = quiz_data.get('title', 'Quiz Test')
-    creator = quiz_data.get('creator', DEFAULT_CREATOR_NAME)
+    title = str(quiz_data.get('title', 'Quiz Test'))
+    creator = str(quiz_data.get('creator', DEFAULT_CREATOR_NAME))
     questions = quiz_data.get('questions', [])
 
-    pdf.set_font(font_name, size=16)
+    # Title & Meta
     pdf.set_text_color(26, 35, 126)
-    pdf.cell(0, 10, text=str(title), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, text=title, align="C", new_x="LMARGIN", new_y="NEXT")
 
-    pdf.set_font(font_name, size=10)
+    pdf.set_font("Devanagari", size=10)
     pdf.set_text_color(100, 100, 100)
     pdf.cell(0, 6, text=f"Creator: {creator}  |  Total Questions: {len(questions)}", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
@@ -102,13 +94,13 @@ def generate_pdf_bytes(quiz_data):
     opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
 
     for i, q in enumerate(questions, 1):
-        pdf.set_font(font_name, size=11)
+        pdf.set_font("Devanagari", size=11)
         pdf.set_text_color(0, 0, 0)
         q_text = f"Q{i}. {q.get('question', '')}"
         pdf.multi_cell(0, 6, text=q_text, new_x="LMARGIN", new_y="NEXT")
 
         options = q.get('options', [])
-        pdf.set_font(font_name, size=10)
+        pdf.set_font("Devanagari", size=10)
         pdf.set_text_color(40, 40, 40)
         for o_idx, opt in enumerate(options):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
@@ -118,7 +110,7 @@ def generate_pdf_bytes(quiz_data):
         corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
         correct_text = options[correct_idx] if correct_idx < len(options) else ""
 
-        pdf.set_font(font_name, size=10)
+        pdf.set_font("Devanagari", size=10)
         pdf.set_text_color(46, 125, 50)
         pdf.multi_cell(0, 6, text=f"   Correct Answer: {corr_lbl} {correct_text}", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
@@ -177,7 +169,7 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ नया क्विज़ सत्र शुरू हुआ: *'{title}'*\n"
         f"🆔 ID: `{q_id}`\n"
         f"👤 Creator: *{DEFAULT_CREATOR_NAME}*\n\n"
-        "👉 अब **@QuizBot** से जितने चाहे पोल सीधे फ़ॉरवर्ड करें।\n"
+        "👉 अब **@QuizBot** से जितने चाहे पोल फ़ॉरवर्ड करें।\n"
         "सारे फ़ॉरवर्ड करने के बाद अंत में **/done** भेजें।"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -211,7 +203,7 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in active_creators or not active_creators[user_id]["questions"]:
-        await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। कृपया पहले पोल फ़ॉरवर्ड करें।", parse_mode="Markdown")
+        await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। पहले पोल फ़ॉरवर्ड करें।", parse_mode="Markdown")
         return
 
     quiz_data = active_creators[user_id]
@@ -288,7 +280,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=chat_id, text="⏳ हिंदी पीडीएफ तैयार की जा रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
-        safe_filename = f"{all_q[quiz_id].get('title', 'Quiz')}.pdf".replace(" ", "_")
+        safe_filename = "quiz_paper.pdf"
 
         await context.bot.send_document(
             chat_id=chat_id,
