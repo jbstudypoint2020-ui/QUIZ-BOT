@@ -5,10 +5,7 @@ import string
 import io
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+from xhtml2pdf import pisa
 
 from telegram import (
     Update,
@@ -57,80 +54,100 @@ def save_quizzes(data):
 
 QUIZZES = load_quizzes()
 user_states = {}
-active_creators = {}  # {user_id: {"title": str, "questions": list, "id": str}}
+active_creators = {}
 
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
+# हिंदी सपोर्टेड HTML से PDF जनरेटर
 def generate_pdf_bytes(quiz_data):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'TitleStyle',
-        parent=styles['Heading1'],
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor("#1a237e"),
-        alignment=1,
-        spaceAfter=15
-    )
-    meta_style = ParagraphStyle(
-        'MetaStyle',
-        parent=styles['Normal'],
-        fontSize=10,
-        leading=14,
-        textColor=colors.dimgrey,
-        alignment=1,
-        spaceAfter=20
-    )
-    q_style = ParagraphStyle(
-        'QStyle',
-        parent=styles['Normal'],
-        fontSize=11,
-        leading=15,
-        textColor=colors.black,
-        spaceBefore=10,
-        spaceAfter=5
-    )
-    opt_style = ParagraphStyle(
-        'OptStyle',
-        parent=styles['Normal'],
-        fontSize=10,
-        leading=14,
-        textColor=colors.HexColor("#333333"),
-        leftIndent=15,
-        spaceAfter=3
-    )
-    ans_style = ParagraphStyle(
-        'AnsStyle',
-        parent=styles['Normal'],
-        fontSize=9,
-        leading=12,
-        textColor=colors.HexColor("#2e7d32"),
-        leftIndent=15,
-        spaceAfter=8
-    )
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            @page {{
+                size: letter;
+                margin: 20mm;
+            }}
+            body {{
+                font-family: Helvetica, Arial, sans-serif;
+                color: #222;
+                font-size: 13px;
+                line-height: 1.4;
+            }}
+            .header {{
+                text-align: center;
+                border-bottom: 2px solid #1a237e;
+                padding-bottom: 8px;
+                margin-bottom: 15px;
+            }}
+            .title {{
+                font-size: 20px;
+                font-weight: bold;
+                color: #1a237e;
+                margin: 0;
+            }}
+            .meta {{
+                font-size: 11px;
+                color: #555;
+                margin-top: 5px;
+            }}
+            .question-box {{
+                margin-bottom: 14px;
+                page-break-inside: avoid;
+            }}
+            .q-title {{
+                font-weight: bold;
+                font-size: 13px;
+                color: #000;
+                margin-bottom: 4px;
+            }}
+            .option {{
+                margin-left: 15px;
+                font-size: 12px;
+                color: #333;
+                margin-bottom: 2px;
+            }}
+            .answer {{
+                margin-left: 15px;
+                font-size: 11px;
+                font-weight: bold;
+                color: #2e7d32;
+                margin-top: 3px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="title">{quiz_data.get('title', 'Quiz Test')}</div>
+            <div class="meta">Created by: {quiz_data.get('creator', 'Admin')} | Total Questions: {len(quiz_data.get('questions', []))}</div>
+        </div>
+    """
 
-    story = []
-    story.append(Paragraph(f"<b>{quiz_data['title']}</b>", title_style))
-    story.append(Paragraph(f"Created by: {quiz_data.get('creator', 'Admin')} | Total Questions: {len(quiz_data['questions'])}", meta_style))
-    story.append(Spacer(1, 10))
+    opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)"]
+    for i, q in enumerate(quiz_data.get("questions", []), 1):
+        clean_q = q['question'].replace('<', '&lt;').replace('>', '&gt;')
+        html_content += f'<div class="question-box">'
+        html_content += f'<div class="q-title">Q{i}. {clean_q}</div>'
 
-    for i, q in enumerate(quiz_data['questions'], 1):
-        story.append(Paragraph(f"<b>Q{i}. {q['question']}</b>", q_style))
-        opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)"]
-        for o_idx, opt in enumerate(q['options']):
+        for o_idx, opt in enumerate(q.get("options", [])):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            story.append(Paragraph(f"{lbl} {opt}", opt_style))
-        
+            clean_opt = opt.replace('<', '&lt;').replace('>', '&gt;')
+            html_content += f'<div class="option">{lbl} {clean_opt}</div>'
+
         correct_idx = q.get('correct_id', 0)
         corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
         correct_text = q['options'][correct_idx] if correct_idx < len(q['options']) else ""
-        story.append(Paragraph(f"<b>Correct Answer:</b> {corr_lbl} {correct_text}", ans_style))
+        clean_ans = correct_text.replace('<', '&lt;').replace('>', '&gt;')
+        html_content += f'<div class="answer">Correct Answer: {corr_lbl} {clean_ans}</div>'
+        html_content += '</div>'
 
-    doc.build(story)
+    html_content += "</body></html>"
+
+    buffer = io.BytesIO()
+    pisa.CreatePDF(html_content, dest=buffer, encoding='utf-8')
     buffer.seek(0)
     return buffer
 
@@ -154,11 +171,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         f"🇮🇳 *नमस्ते {user.first_name}!*\n\n"
-        "• नया क्विज़ बनाने के लिए: `/create क्विज़ का नाम`\n"
-        "  *(उदाहरण: `/create इतिहास टेस्ट-1`)*\n"
+        "• नया क्विज़: `/create क्विज़ का नाम`\n"
         "• सारे प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
-        "• सभी क्विज़ देखने के लिए: `/myquizzes`\n"
-        "• सीधे PDF डाउनलोड करने के लिए: `/pdf QUIZ_ID`"
+        "• सभी क्विज़ देखें: `/myquizzes`\n"
+        "• PDF डाउनलोड करें: `/pdf QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -180,17 +196,16 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     msg = (
-        f"✅ नया क्विज़ सत्र शुरू हुआ: *'{title}'*\n"
+        f"✅ नया क्विज़: *'{title}'*\n"
         f"🆔 ID: `{q_id}`\n\n"
-        "👉 अब **@QuizBot** से जितने चाहे पोल सीधे फ़ॉरवर्ड करें।\n"
-        "सारे फ़ॉरवर्ड करने के बाद अंत में **/done** भेजें।"
+        "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करें।\n"
+        "अंत में **/done** भेजें।"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in active_creators:
-        # अगर बिना /create के भी पोल फ़ॉरवर्ड किया गया तो ऑटो-स्टार्ट कर देगा
         q_id = generate_quiz_id()
         active_creators[user_id] = {
             "title": "History Quiz",
@@ -217,7 +232,7 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in active_creators or not active_creators[user_id]["questions"]:
-        await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। कृपया पहले पोल फ़ॉरवर्ड करें या `/create नाम` भेजें।", parse_mode="Markdown")
+        await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। पहले पोल फ़ॉरवर्ड करें।", parse_mode="Markdown")
         return
 
     quiz_data = active_creators[user_id]
@@ -259,7 +274,7 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not QUIZZES:
-        await update.message.reply_text("कोई क्विज़ मौजूद नहीं है। `/create नाम` दबाकर नया बनाएं।", parse_mode="Markdown")
+        await update.message.reply_text("कोई क्विज़ मौजूद नहीं है।", parse_mode="Markdown")
         return
 
     lines = [f"🧩 *Your Quizzes (Page 1)*\nTotal: {len(QUIZZES)}\n"]
@@ -286,7 +301,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।", parse_mode="Markdown")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ पीडीएफ तैयार की जा रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ हिंदी पीडीएफ तैयार की जा रही है...")
     pdf_buffer = generate_pdf_bytes(QUIZZES[quiz_id])
     safe_filename = f"{QUIZZES[quiz_id]['title'].replace(' ', '_')}.pdf"
     
