@@ -84,7 +84,7 @@ def send_quiz_email_backup(quiz_title, quiz_id, total_q, quiz_dict):
             f"• Quiz ID: {quiz_id}\n"
             f"• कुल प्रश्न: {total_q}\n"
             f"• Telegram Play: /play {quiz_id}\n\n"
-            f"JSON डेटा अटैचमेंट में है।"
+            f"JSON डेटा अटैचमेंट में सुरक्षित है।"
         )
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
@@ -99,10 +99,10 @@ def send_quiz_email_backup(quiz_title, quiz_id, total_q, quiz_dict):
     except Exception as e:
         print(f"Email error: {e}")
 
-# --- WEB CREATOR ---
+# --- WEB DASHBOARD ---
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="hi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JB STUDY POINT - Test Creator</title>
+<title>JB STUDY POINT - Quiz Creator</title>
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, Roboto, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; }
 .box { max-width: 650px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
@@ -143,7 +143,7 @@ function addQuestion() {
 }
 </script></head><body>
 <div class="box">
-  <h2>JB STUDY POINT - Test Creator</h2>
+  <h2>JB STUDY POINT - Quiz Creator</h2>
   <form action="/save_quiz" method="POST">
     <input type="hidden" name="total_questions" id="total_q" value="1">
     <div class="field"><label>टेस्ट का नाम:</label><input type="text" name="title" value="इतिहास टेस्ट" required></div>
@@ -237,7 +237,7 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
     server.serve_forever()
 
-# --- 300 DPI ULTRA HD BOOKLET ---
+# --- ULTRA HD 300 DPI PDF BOOKLET (BOLD BIG HEADER) ---
 def generate_pdf_bytes(quiz_data):
     PAGE_W = 2480
     PAGE_H = 3508
@@ -246,9 +246,10 @@ def generate_pdf_bytes(quiz_data):
     COL_GAP = 70
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
-    f_brand = ImageFont.truetype(FONT_PATH, 48)
-    f_sub = ImageFont.truetype(FONT_PATH, 26)
-    f_title = ImageFont.truetype(FONT_PATH, 46)
+    # बड़े और मोटे (Bold & Big) अक्षरों के लिए फॉन्ट साइज़
+    f_jb_big = ImageFont.truetype(FONT_PATH, 68)
+    f_sub = ImageFont.truetype(FONT_PATH, 28)
+    f_title = ImageFont.truetype(FONT_PATH, 48)
     f_tbl_head = ImageFont.truetype(FONT_PATH, 22)
     f_tbl_val = ImageFont.truetype(FONT_PATH, 26)
     f_inst_title = ImageFont.truetype(FONT_PATH, 26)
@@ -256,7 +257,7 @@ def generate_pdf_bytes(quiz_data):
     f_bar = ImageFont.truetype(FONT_PATH, 28)
     f_q = ImageFont.truetype(FONT_PATH, 28)
     f_opt = ImageFont.truetype(FONT_PATH, 26)
-    f_ans_title = ImageFont.truetype(FONT_PATH, 50)
+    f_ans_title = ImageFont.truetype(FONT_PATH, 54)
     f_key = ImageFont.truetype(FONT_PATH, 30)
 
     title = str(quiz_data.get('title', 'MOCK TEST'))
@@ -287,28 +288,35 @@ def generate_pdf_bytes(quiz_data):
         img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
         draw = ImageDraw.Draw(img)
 
-        draw.text((MARGIN_X, 45), f"{creator.upper()} — MOCK TEST SERIES", font=f_sub, fill="#666666")
-        draw.text((PAGE_W - MARGIN_X - 440, 45), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#666666")
+        # टॉप हेडर बार
+        draw.text((MARGIN_X, 40), "JB STUDY POINT — MOCK TEST SERIES", font=f_sub, fill="#666666")
+        draw.text((PAGE_W - MARGIN_X - 440, 40), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#666666")
         draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#CCCCCC", width=2)
 
         y_offset = MARGIN_Y + 25
 
         if is_first:
-            draw.ellipse([MARGIN_X, y_offset, MARGIN_X + 96, y_offset + 96], outline="#8B0000", width=4)
-            draw.text((MARGIN_X + 22, y_offset + 22), "JB", font=f_brand, fill="#8B0000")
-            draw.text((MARGIN_X + 115, y_offset + 8), creator, font=f_brand, fill="#111111")
-            draw.text((MARGIN_X + 118, y_offset + 60), "TEST SERIES & ACADEMIC CELL", font=f_sub, fill="#555555")
-            draw.line([(MARGIN_X, y_offset + 110), (PAGE_W - MARGIN_X, y_offset + 110)], fill="#8B0000", width=4)
-            y_offset += 130
+            # बड़े और मोटे (Bold & Big) अक्षरों में JB STUDY POINT
+            jb_bbox = draw.textbbox((0, 0), "JB STUDY POINT", font=f_jb_big)
+            jb_x = (PAGE_W - (jb_bbox[2] - jb_bbox[0])) // 2
+            # 3D/Bold इफ़ेक्ट के लिए डबल स्ट्राइक
+            draw.text((jb_x, y_offset), "JB STUDY POINT", font=f_jb_big, fill="#8B0000")
+            draw.text((jb_x + 1, y_offset), "JB STUDY POINT", font=f_jb_big, fill="#8B0000")
+            y_offset += 78
+
+            sub_header = f"{creator.upper()} | TEST SERIES & ACADEMIC CELL"
+            s_bbox = draw.textbbox((0, 0), sub_header, font=f_sub)
+            draw.text(((PAGE_W - (s_bbox[2] - s_bbox[0])) // 2, y_offset), sub_header, font=f_sub, fill="#333333")
+            y_offset += 45
+
+            draw.line([(MARGIN_X, y_offset), (PAGE_W - MARGIN_X, y_offset)], fill="#8B0000", width=4)
+            y_offset += 25
 
             t_bbox = draw.textbbox((0, 0), title.upper(), font=f_title)
             draw.text(((PAGE_W - (t_bbox[2] - t_bbox[0])) // 2, y_offset), title.upper(), font=f_title, fill="#000000")
             y_offset += 60
 
-            sub_b = draw.textbbox((0, 0), "Paper - II : History Practice Booklet", font=f_sub)
-            draw.text(((PAGE_W - (sub_b[2] - sub_b[0])) // 2, y_offset), "Paper - II : History Practice Booklet", font=f_sub, fill="#555555")
-            y_offset += 50
-
+            # ग्रिड टेबल
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 150], outline="#333333", width=2)
             draw.line([(MARGIN_X + 440, y_offset), (MARGIN_X + 440, y_offset + 150)], fill="#333333", width=2)
             draw.line([(PAGE_W - MARGIN_X - 640, y_offset), (PAGE_W - MARGIN_X - 640, y_offset + 150)], fill="#333333", width=2)
@@ -339,6 +347,7 @@ def generate_pdf_bytes(quiz_data):
             draw.text((PAGE_W - MARGIN_X - 620, y_offset + 104), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
             y_offset += 175
 
+            # निर्देश
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 185], outline="#DDDDDD", width=2)
             draw.text((MARGIN_X + 30, y_offset + 12), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
             draw.text((MARGIN_X + 30, y_offset + 48), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
@@ -408,9 +417,10 @@ def generate_pdf_bytes(quiz_data):
 
     pages.append(cur_img)
 
+    # उत्तर तालिका पृष्ठ
     ans_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
     ans_draw = ImageDraw.Draw(ans_img)
-    ans_draw.text((MARGIN_X, 45), f"{creator.upper()} — ANSWER KEY & EVALUATION", font=f_sub, fill="#666666")
+    ans_draw.text((MARGIN_X, 40), "JB STUDY POINT — ANSWER KEY & EVALUATION", font=f_sub, fill="#666666")
     ans_draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#8B0000", width=4)
 
     ay = 120
@@ -446,7 +456,7 @@ def generate_pdf_bytes(quiz_data):
     pdf_io.seek(0)
     return pdf_io
 
-# --- 100 QUESTIONS PRINTABLE OMR SHEET GENERATOR ---
+# --- PRINTABLE OMR GENERATOR ---
 def generate_omr_sheet_bytes():
     PAGE_W = 2480
     PAGE_H = 3508
@@ -456,19 +466,17 @@ def generate_omr_sheet_bytes():
     img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
     draw = ImageDraw.Draw(img)
 
-    f_title = ImageFont.truetype(FONT_PATH, 44)
+    f_jb = ImageFont.truetype(FONT_PATH, 54)
     f_sub = ImageFont.truetype(FONT_PATH, 24)
     f_box = ImageFont.truetype(FONT_PATH, 22)
     f_num = ImageFont.truetype(FONT_PATH, 22)
     f_opt = ImageFont.truetype(FONT_PATH, 20)
 
-    # Header Card
     draw.rectangle([MARGIN_X, MARGIN_Y, PAGE_W - MARGIN_X, MARGIN_Y + 180], outline="#8B0000", width=4)
-    draw.text((MARGIN_X + 40, MARGIN_Y + 25), "JB STUDY POINT — OMR ANSWER SHEET", font=f_title, fill="#8B0000")
-    draw.text((MARGIN_X + 40, MARGIN_Y + 90), "Use Blue or Black Ball Point Pen only. Darken the bubbles completely.", font=f_sub, fill="#444444")
-    draw.text((MARGIN_X + 40, MARGIN_Y + 130), "नाम (Name): _______________________   अनुक्रमांक (Roll No): ___________________", font=f_box, fill="#111111")
+    draw.text((MARGIN_X + 40, MARGIN_Y + 25), "JB STUDY POINT — OMR ANSWER SHEET", font=f_jb, fill="#8B0000")
+    draw.text((MARGIN_X + 40, MARGIN_Y + 95), "Use Blue or Black Ball Point Pen only. Darken bubbles completely.", font=f_sub, fill="#444444")
+    draw.text((MARGIN_X + 40, MARGIN_Y + 135), "Name: _______________________________   Roll No: ___________________________", font=f_box, fill="#111111")
 
-    # 4 Columns of 25 Questions = 100 Questions
     cols = 4
     q_per_col = 25
     col_w = (PAGE_W - (2 * MARGIN_X) - 150) // cols
@@ -496,7 +504,7 @@ def generate_omr_sheet_bytes():
     img.save(pdf_io, format="PDF", resolution=300.0)
     pdf_io.seek(0)
     return pdf_io
-    # --- BOT COMMANDS & GAME ENGINE ---
+    # --- FAST GAME ENGINE & BOT LOGIC ---
 async def post_init(application):
     commands = [
         BotCommand("start", "Start the bot"),
@@ -526,6 +534,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• टेस्ट सूची: `/myquizzes`\n"
         "• ईमेल पर बैकअप: `/backup`\n"
         "• OMR शीट डाउनलोड करें: `/omr`\n"
+        "• JSON बैकअप फ़ाइल भेजकर रिस्टोर भी कर सकते हैं।\n"
         "• ग्रुप में चलायें: `/play QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
@@ -657,6 +666,30 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         await update.message.reply_text(card_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+async def handle_document_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    doc = update.message.document
+    if doc and doc.file_name.endswith(".json"):
+        await update.message.reply_text("⏳ बैकअप फ़ाइल प्रोसेस की जा रही है...")
+        try:
+            tg_file = await context.bot.get_file(doc.file_id)
+            b_data = await tg_file.download_as_bytearray()
+            restored = json.loads(b_data.decode("utf-8"))
+
+            all_q = get_all_quizzes()
+            if "id" in restored and "questions" in restored:
+                all_q[restored["id"]] = restored
+                save_all_quizzes(all_q)
+                await update.message.reply_text(f"✅ टेस्ट `{restored.get('title')}` सफलतापूर्वक रिस्टोर हो गया! (ID: `{restored['id']}`)")
+            elif isinstance(restored, dict):
+                all_q.update(restored)
+                save_all_quizzes(all_q)
+                await update.message.reply_text(f"✅ कुल {len(restored)} टेस्ट सफलतापूर्वक रिस्टोर हो गए!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ रिस्टोर विफल: {str(e)}")
+
 async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -671,7 +704,7 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ बैकअप ईमेल भेज दिया गया है! कृपया अपना इनबॉक्स या Updates फ़ोल्डर देखें।")
 
 async def omr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ 100 प्रश्नों की प्रिंटेबल OMR शीट तैयार हो रही है...")
+    await update.message.reply_text("⏳ 100 प्रश्नों की OMR शीट तैयार हो रही है...")
     try:
         omr_buffer = generate_omr_sheet_bytes()
         await context.bot.send_document(
@@ -690,7 +723,7 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_id = context.args[0].strip().upper()
     await prompt_quiz_settings(update.effective_chat.id, quiz_id, update.effective_user.id, context)
 
-# --- ADVANCED TEST SETTINGS ---
+# --- ADVANCED SETTINGS ---
 async def prompt_quiz_settings(chat_id, quiz_id, host_user_id, context: ContextTypes.DEFAULT_TYPE):
     all_q = get_all_quizzes()
     if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
@@ -756,7 +789,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             ]
             await query.edit_message_text(
-                text=f"⏱ समय: *{timer_val}s*\n\n2️⃣ **निगेटिव मार्किंग (Negative Marking) चुनें:**",
+                text=f"⏱ समय: *{timer_val}s*\n\n2️⃣ **निगेटिव मार्किंग चुनें:**",
                 reply_markup=InlineKeyboardMarkup(neg_keyboard),
                 parse_mode="Markdown"
             )
@@ -848,7 +881,9 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, conte
         "show_exp": show_exp,
         "users": {},
         "current_msg_id": None,
-        "total_q": total
+        "total_q": total,
+        "answered_users": set(),
+        "timer_task": None
     }
 
     start_banner = (
@@ -858,23 +893,26 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, conte
         f"⏱ समय: *{timer_sec}s प्रति प्रश्न*\n"
         f"⚠️ निगेटिव मार्किंग: *{'-' + str(neg_val) if neg_val > 0 else 'नहीं (0)'}*\n"
         f"💡 व्याख्या: *{'सक्रिय (ON)' if show_exp else 'बंद (OFF)'}*\n\n"
-        "⚡ *पहला प्रश्न 3 सेकंड में आ रहा है... तैयार रहें!*"
+        "⚡ *पहला प्रश्न 2 सेकंड में आ रहा है... तैयार रहें!*"
     )
     await context.bot.send_message(chat_id=chat_id, text=start_banner, parse_mode="Markdown")
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
     await send_next_question(chat_id, context)
 
 async def auto_timer_countdown(chat_id, msg_id, duration, context: ContextTypes.DEFAULT_TYPE):
-    await asyncio.sleep(duration)
-    if chat_id in active_group_quizzes:
-        sess = active_group_quizzes[chat_id]
-        if sess.get("current_msg_id") == msg_id:
-            try:
-                await context.bot.stop_poll(chat_id=chat_id, message_id=msg_id)
-            except Exception:
-                pass
-            await asyncio.sleep(1)
-            await send_next_question(chat_id, context)
+    try:
+        await asyncio.sleep(duration)
+        if chat_id in active_group_quizzes:
+            sess = active_group_quizzes[chat_id]
+            if sess.get("current_msg_id") == msg_id:
+                try:
+                    await context.bot.stop_poll(chat_id=chat_id, message_id=msg_id)
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
+                await send_next_question(chat_id, context)
+    except asyncio.CancelledError:
+        pass
 
 async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in active_group_quizzes:
@@ -886,6 +924,8 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
     idx = sess["index"]
     timer_sec = int(sess["timer"])
     show_exp = sess["show_exp"]
+
+    sess["answered_users"] = set()
 
     if idx < len(quiz["questions"]):
         q = quiz["questions"][idx]
@@ -922,10 +962,11 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
 
         sess["current_msg_id"] = poll_msg.message_id
         context.bot_data[poll_msg.poll.id] = (chat_id, int(q["correct_id"]), idx)
-        asyncio.create_task(auto_timer_countdown(chat_id, poll_msg.message_id, timer_sec, context))
+        sess["timer_task"] = asyncio.create_task(auto_timer_countdown(chat_id, poll_msg.message_id, timer_sec, context))
     else:
         await finish_quiz_and_show_ranks(chat_id, context)
 
+# --- आंसर आते ही तुरंत अगला सवाल भेजने का लॉजिक ---
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     p_ans = update.poll_answer
     poll_id = p_ans.poll_id
@@ -947,6 +988,8 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     "wrong_questions": []
                 }
 
+            sess["answered_users"].add(uid)
+
             if p_ans.option_ids:
                 user_choice = p_ans.option_ids[0]
                 if user_choice == correct_id:
@@ -955,7 +998,6 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 else:
                     sess["users"][uid]["wrong"] += 1
                     sess["users"][uid]["score"] -= sess["negative"]
-                    # छात्र द्वारा गलत किए गए प्रश्न को रिकॉर्ड करना
                     all_q = get_all_quizzes()
                     q_data = all_q[sess["quiz_id"]]["questions"][q_idx]
                     sess["users"][uid]["wrong_questions"].append({
@@ -963,6 +1005,23 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         "question": q_data["question"],
                         "correct_opt": q_data["options"][correct_id]
                     })
+
+            # जैसे ही प्रतिभागी उत्तर दे, तुरंत 1.5 सेकंड में अगला सवाल भेजें
+            if sess.get("timer_task") and not sess["timer_task"].done():
+                sess["timer_task"].cancel()
+                asyncio.create_task(trigger_fast_next(chat_id, sess.get("current_msg_id"), context))
+
+async def trigger_fast_next(chat_id, msg_id, context: ContextTypes.DEFAULT_TYPE):
+    await asyncio.sleep(1.5)
+    if chat_id in active_group_quizzes:
+        sess = active_group_quizzes[chat_id]
+        if sess.get("current_msg_id") == msg_id:
+            try:
+                await context.bot.stop_poll(chat_id=chat_id, message_id=msg_id)
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+            await send_next_question(chat_id, context)
 
 async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in active_group_quizzes:
@@ -986,7 +1045,6 @@ async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     leaderboard_lines = []
 
-    # संभावित कट-ऑफ की गणना
     highest_score = max(0.0, round(sorted_users[0][1]["score"], 2))
     gen_cut = round(highest_score * 0.75, 2)
     obc_cut = round(highest_score * 0.68, 2)
@@ -997,7 +1055,6 @@ async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE
         final_sc = max(0.0, round(p['score'], 2))
         leaderboard_lines.append(f"{badge} *{p['name']}* — {final_sc}/{total_q} अंक (✅{p['correct']} | ❌{p['wrong']})")
 
-        # छात्र को विस्तृत व्यक्तिगत समीक्षा व गलत प्रश्नों की सूची भेजना
         try:
             wrong_review = ""
             if p["wrong_questions"]:
@@ -1084,6 +1141,7 @@ def main():
     app.add_handler(CommandHandler("pdf", pdf_command))
     app.add_handler(CommandHandler("omr", omr_command))
     app.add_handler(CommandHandler("backup", backup_command))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document_restore))
     app.add_handler(MessageHandler(filters.POLL, handle_incoming_poll))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     app.add_handler(CallbackQueryHandler(button_click))
