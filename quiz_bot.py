@@ -63,8 +63,18 @@ pending_setups = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
+# --- उन्नत प्रश्न क्लीनर (अब टाइमर, [15s], [⏱ 15s] आदि को पूरी तरह हटा देगा) ---
 def clean_question_text(raw_text):
-    text = re.sub(r"^\s*\[\s*\d+\s*/\s*\d+\s*\]\s*", "", raw_text)
+    if not raw_text:
+        return ""
+    text = str(raw_text)
+    # पोल के हेडर और टाइमर मार्क्स हटाना
+    text = re.sub(r"\[\s*\d+\s*/\s*\d+\s*\]", "", text)
+    text = re.sub(r"⏱\s*\d+s?", "", text)
+    text = re.sub(r"\d+s\s*\|", "", text)
+    text = re.sub(r"\[\s*\d+s\s*\]", "", text)
+    text = re.sub(r"\[.*?s.*?\]", "", text)
+    text = re.sub(r"^\s*\[\s*\d+\s*/\s*\d+\s*\]\s*", "", text)
     text = re.sub(r"^\s*(?:Q|q|प्रश्न)?\s*\d+[\.\)\-:]\s*", "", text)
     text = re.sub(r"^\s*\[\s*\d+\s*\]\s*", "", text)
     text = re.sub(r"^\s*\(\s*\d+\s*\)\s*", "", text)
@@ -374,7 +384,7 @@ def generate_pdf_bytes(quiz_data):
         opt_items = []
         for o_idx, opt in enumerate(q.get('options', [])):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            c_opt = re.sub(r"^\s*[A-Ha-h1-9][\.\)\-:]\s*", "", opt)
+            c_opt = clean_question_text(opt)
             wrapped = wrap_text(f"{lbl} {c_opt}", f_opt, COL_W - 30, cur_draw)
             opt_items.append(wrapped)
 
@@ -573,9 +583,9 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     if not poll:
         return
 
-    options = [opt.text for opt in poll.options]
+    options = [clean_question_text(opt.text) for opt in poll.options]
     correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
-    explanation = poll.explanation if hasattr(poll, "explanation") and poll.explanation else ""
+    explanation = clean_question_text(poll.explanation) if hasattr(poll, "explanation") and poll.explanation else ""
 
     cleaned_q = clean_question_text(poll.question)
 
@@ -910,7 +920,6 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, is_pr
     await asyncio.sleep(2)
     await send_next_question(chat_id, context)
 
-# टाइमर केवल तब सवाल बदलेगा जब समय पूरा खत्म हो जाए
 async def auto_timer_countdown(chat_id, msg_id, duration, context: ContextTypes.DEFAULT_TYPE):
     try:
         await asyncio.sleep(duration)
@@ -976,7 +985,6 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
     else:
         await finish_quiz_and_show_ranks(chat_id, context)
 
-# --- आंसर हैंडलर: ग्रुप और पर्सनल का पूरी तरह अलग व्यवहार ---
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     p_ans = update.poll_answer
     poll_id = p_ans.poll_id
@@ -1014,8 +1022,6 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         "correct_opt": q_data["options"][correct_id]
                     })
 
-            # ग्रुप में कोई व्यवधान नहीं: टाइमर पूरा समय चलेगा ताकि हर छात्र अपना उत्तर चुन सके
-            # पर्सनल चैट (DM) में: तुरंत 1.5s में अगला प्रश्न भेजा जाएगा
             if sess.get("is_private") is True:
                 if sess.get("timer_task") and not sess["timer_task"].done():
                     sess["timer_task"].cancel()
