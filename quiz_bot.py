@@ -58,8 +58,11 @@ def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 def clean_question_text(raw_text):
-    text = re.sub(r"^\s*\[\d+/\d+\]\s*", "", raw_text)
-    text = re.sub(r"^\s*(Q|q)?\d+[\.\)\-:]\s*", "", text)
+    # सभी तरह के पुराने नंबर जैसे [20/61], [ 6/25 ], Q1., 1., 1) को साफ़ करता है
+    text = re.sub(r"^\s*\[\s*\d+\s*/\s*\d+\s*\]\s*", "", raw_text)
+    text = re.sub(r"^\s*(?:Q|q|प्रश्न)?\s*\d+[\.\)\-:]\s*", "", text)
+    text = re.sub(r"^\s*\[\s*\d+\s*\]\s*", "", text)
+    text = re.sub(r"^\s*\(\s*\d+\s*\)\s*", "", text)
     return text.strip()
 
 # --- WEB SERVER ---
@@ -154,7 +157,7 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
 
             questions = []
             for idx in range(1, total + 1):
-                qt = parsed.get(f"q_text_{idx}", [""])[0].strip()
+                qt = clean_question_text(parsed.get(f"q_text_{idx}", [""])[0])
                 if not qt:
                     continue
                 oa = parsed.get(f"q_optA_{idx}", [""])[0].strip()
@@ -197,27 +200,28 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
     server.serve_forever()
 
-# --- 2-COLUMN BOOKLET PDF ---
+# --- ULTRA HD 2-COLUMN BOOKLET PDF GENERATOR ---
 def generate_pdf_bytes(quiz_data):
-    PAGE_W = 1240
-    PAGE_H = 1754
-    MARGIN_X = 50
-    MARGIN_Y = 40
-    COL_GAP = 30
+    PAGE_W = 2480
+    PAGE_H = 3508
+    MARGIN_X = 100
+    MARGIN_Y = 80
+    COL_GAP = 70
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
-    f_brand = ImageFont.truetype(FONT_PATH, 24)
-    f_sub = ImageFont.truetype(FONT_PATH, 13)
-    f_title = ImageFont.truetype(FONT_PATH, 22)
-    f_tbl_head = ImageFont.truetype(FONT_PATH, 11)
-    f_tbl_val = ImageFont.truetype(FONT_PATH, 12)
-    f_inst_title = ImageFont.truetype(FONT_PATH, 12)
-    f_inst = ImageFont.truetype(FONT_PATH, 11)
-    f_bar = ImageFont.truetype(FONT_PATH, 13)
-    f_q = ImageFont.truetype(FONT_PATH, 14)
-    f_opt = ImageFont.truetype(FONT_PATH, 13)
-    f_ans_title = ImageFont.truetype(FONT_PATH, 24)
-    f_key = ImageFont.truetype(FONT_PATH, 15)
+    # High Resolution Crisp Fonts
+    f_brand = ImageFont.truetype(FONT_PATH, 48)
+    f_sub = ImageFont.truetype(FONT_PATH, 26)
+    f_title = ImageFont.truetype(FONT_PATH, 46)
+    f_tbl_head = ImageFont.truetype(FONT_PATH, 22)
+    f_tbl_val = ImageFont.truetype(FONT_PATH, 26)
+    f_inst_title = ImageFont.truetype(FONT_PATH, 26)
+    f_inst = ImageFont.truetype(FONT_PATH, 23)
+    f_bar = ImageFont.truetype(FONT_PATH, 28)
+    f_q = ImageFont.truetype(FONT_PATH, 28)
+    f_opt = ImageFont.truetype(FONT_PATH, 26)
+    f_ans_title = ImageFont.truetype(FONT_PATH, 50)
+    f_key = ImageFont.truetype(FONT_PATH, 30)
 
     title = str(quiz_data.get('title', 'MOCK TEST'))
     creator = str(quiz_data.get('creator', DEFAULT_CREATOR))
@@ -246,70 +250,78 @@ def generate_pdf_bytes(quiz_data):
     def create_new_page(is_first=False):
         img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
         draw = ImageDraw.Draw(img)
-        draw.text((MARGIN_X, 22), f"{creator.upper()} — MOCK TEST SERIES", font=f_sub, fill="#777777")
-        draw.text((PAGE_W - MARGIN_X - 220, 22), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#777777")
-        draw.line([(MARGIN_X, 36), (PAGE_W - MARGIN_X, 36)], fill="#DDDDDD", width=1)
 
-        y_offset = MARGIN_Y + 10
+        # Header bar
+        draw.text((MARGIN_X, 45), f"{creator.upper()} — MOCK TEST SERIES", font=f_sub, fill="#666666")
+        draw.text((PAGE_W - MARGIN_X - 440, 45), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#666666")
+        draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#CCCCCC", width=2)
+
+        y_offset = MARGIN_Y + 25
+
         if is_first:
-            draw.ellipse([MARGIN_X, y_offset, MARGIN_X + 48, y_offset + 48], outline="#8B0000", width=2)
-            draw.text((MARGIN_X + 11, y_offset + 12), "JB", font=f_brand, fill="#8B0000")
-            draw.text((MARGIN_X + 58, y_offset + 5), creator, font=f_brand, fill="#111111")
-            draw.text((MARGIN_X + 60, y_offset + 32), "TEST SERIES & ACADEMIC CELL", font=f_sub, fill="#666666")
-            draw.line([(MARGIN_X, y_offset + 54), (PAGE_W - MARGIN_X, y_offset + 54)], fill="#8B0000", width=2)
-            y_offset += 65
+            # Exam Header Card
+            draw.ellipse([MARGIN_X, y_offset, MARGIN_X + 96, y_offset + 96], outline="#8B0000", width=4)
+            draw.text((MARGIN_X + 22, y_offset + 22), "JB", font=f_brand, fill="#8B0000")
+            draw.text((MARGIN_X + 115, y_offset + 8), creator, font=f_brand, fill="#111111")
+            draw.text((MARGIN_X + 118, y_offset + 60), "TEST SERIES & ACADEMIC CELL", font=f_sub, fill="#555555")
+            draw.line([(MARGIN_X, y_offset + 110), (PAGE_W - MARGIN_X, y_offset + 110)], fill="#8B0000", width=4)
+            y_offset += 130
 
             t_bbox = draw.textbbox((0, 0), title.upper(), font=f_title)
             draw.text(((PAGE_W - (t_bbox[2] - t_bbox[0])) // 2, y_offset), title.upper(), font=f_title, fill="#000000")
-            y_offset += 30
+            y_offset += 60
 
-            sub_b = draw.textbbox((0, 0), "Paper - II : History Practice Paper", font=f_sub)
-            draw.text(((PAGE_W - (sub_b[2] - sub_b[0])) // 2, y_offset), "Paper - II : History Practice Paper", font=f_sub, fill="#555555")
-            y_offset += 25
+            sub_b = draw.textbbox((0, 0), "Paper - II : History Practice Booklet", font=f_sub)
+            draw.text(((PAGE_W - (sub_b[2] - sub_b[0])) // 2, y_offset), "Paper - II : History Practice Booklet", font=f_sub, fill="#555555")
+            y_offset += 50
 
-            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 75], outline="#333333", width=1)
-            draw.line([(MARGIN_X + 220, y_offset), (MARGIN_X + 220, y_offset + 75)], fill="#333333", width=1)
-            draw.line([(PAGE_W - MARGIN_X - 320, y_offset), (PAGE_W - MARGIN_X - 320, y_offset + 75)], fill="#333333", width=1)
-            draw.line([(MARGIN_X, y_offset + 45), (PAGE_W - MARGIN_X, y_offset + 45)], fill="#333333", width=1)
+            # Table Header Grid
+            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 150], outline="#333333", width=2)
+            draw.line([(MARGIN_X + 440, y_offset), (MARGIN_X + 440, y_offset + 150)], fill="#333333", width=2)
+            draw.line([(PAGE_W - MARGIN_X - 640, y_offset), (PAGE_W - MARGIN_X - 640, y_offset + 150)], fill="#333333", width=2)
+            draw.line([(MARGIN_X, y_offset + 90), (PAGE_W - MARGIN_X, y_offset + 90)], fill="#333333", width=2)
 
-            draw.text((MARGIN_X + 10, y_offset + 6), "TEST NO.", font=f_tbl_head, fill="#444444")
-            draw.text((MARGIN_X + 10, y_offset + 22), "01", font=f_tbl_val, fill="#000000")
-            draw.text((MARGIN_X + 230, y_offset + 6), "ROLL NO.", font=f_tbl_head, fill="#444444")
-            rx = MARGIN_X + 230
+            draw.text((MARGIN_X + 20, y_offset + 12), "TEST NO.", font=f_tbl_head, fill="#444444")
+            draw.text((MARGIN_X + 20, y_offset + 42), "01", font=f_tbl_val, fill="#000000")
+
+            draw.text((MARGIN_X + 460, y_offset + 12), "ROLL NO.", font=f_tbl_head, fill="#444444")
+            rx = MARGIN_X + 460
             for _ in range(8):
-                draw.rectangle([rx, y_offset + 20, rx + 16, y_offset + 38], outline="#666666", width=1)
-                rx += 20
+                draw.rectangle([rx, y_offset + 40, rx + 32, y_offset + 76], outline="#666666", width=2)
+                rx += 40
 
-            draw.text((PAGE_W - MARGIN_X - 310, y_offset + 6), "BOOKLET SERIES", font=f_tbl_head, fill="#444444")
-            bx = PAGE_W - MARGIN_X - 310
+            draw.text((PAGE_W - MARGIN_X - 620, y_offset + 12), "BOOKLET SERIES", font=f_tbl_head, fill="#444444")
+            bx = PAGE_W - MARGIN_X - 620
             for char, active in [("A", True), ("B", False), ("C", False), ("D", False)]:
                 if active:
-                    draw.ellipse([bx, y_offset + 22, bx + 16, y_offset + 38], fill="#8B0000")
-                    draw.text((bx + 4, y_offset + 23), char, font=f_tbl_val, fill="#FFFFFF")
+                    draw.ellipse([bx, y_offset + 42, bx + 32, y_offset + 74], fill="#8B0000")
+                    draw.text((bx + 8, y_offset + 44), char, font=f_tbl_val, fill="#FFFFFF")
                 else:
-                    draw.ellipse([bx, y_offset + 22, bx + 16, y_offset + 38], outline="#666666", width=1)
-                    draw.text((bx + 4, y_offset + 23), char, font=f_tbl_val, fill="#000000")
-                bx += 24
+                    draw.ellipse([bx, y_offset + 42, bx + 32, y_offset + 74], outline="#666666", width=2)
+                    draw.text((bx + 8, y_offset + 44), char, font=f_tbl_val, fill="#000000")
+                bx += 48
 
-            draw.text((MARGIN_X + 10, y_offset + 52), "Time: 2 Hours", font=f_tbl_val, fill="#111111")
-            draw.text((MARGIN_X + 230, y_offset + 52), f"Total Questions: {total_q}", font=f_tbl_val, fill="#111111")
-            draw.text((PAGE_W - MARGIN_X - 310, y_offset + 52), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
-            y_offset += 85
+            draw.text((MARGIN_X + 20, y_offset + 104), "Time: 2 Hours", font=f_tbl_val, fill="#111111")
+            draw.text((MARGIN_X + 460, y_offset + 104), f"Total Questions: {total_q}", font=f_tbl_val, fill="#111111")
+            draw.text((PAGE_W - MARGIN_X - 620, y_offset + 104), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
+            y_offset += 175
 
-            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 95], outline="#CCCCCC", width=1)
-            draw.text((MARGIN_X + 20, y_offset + 8), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
-            draw.text((MARGIN_X + 20, y_offset + 26), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
-            draw.text((MARGIN_X + 20, y_offset + 42), "2. ओएमआर उत्तर पत्रक पर केवल नीले/काले बॉल-पॉइंट पेन से गोलों को गहरा करें।", font=f_inst, fill="#333333")
-            draw.text((MARGIN_X + 20, y_offset + 58), "3. परीक्षा कक्ष में मोबाइल फोन या किसी भी उपकरण का प्रयोग वर्जित है।", font=f_inst, fill="#333333")
-            draw.text((MARGIN_X + 20, y_offset + 74), "4. उत्तर तालिका अंतिम पृष्ठ पर प्रदान की गई है।", font=f_inst, fill="#333333")
-            y_offset += 105
+            # Instructions
+            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 185], outline="#DDDDDD", width=2)
+            draw.text((MARGIN_X + 30, y_offset + 12), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
+            draw.text((MARGIN_X + 30, y_offset + 48), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
+            draw.text((MARGIN_X + 30, y_offset + 80), "2. ओएमआर उत्तर पत्रक पर केवल नीले/काले बॉल-पॉइंट पेन से गोलों को गहरा करें।", font=f_inst, fill="#333333")
+            draw.text((MARGIN_X + 30, y_offset + 112), "3. परीक्षा कक्ष में मोबाइल फोन या किसी भी इलेक्ट्रॉनिक उपकरण का प्रयोग वर्जित है।", font=f_inst, fill="#333333")
+            draw.text((MARGIN_X + 30, y_offset + 144), "4. उत्तर तालिका अंतिम पृष्ठ पर प्रदान की गई है।", font=f_inst, fill="#333333")
+            y_offset += 205
 
-            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 26], fill="#8B0000")
+            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 50], fill="#8B0000")
             r_box = draw.textbbox((0, 0), "GENERAL PAPER & SUBJECT SECTION", font=f_bar)
-            draw.text(((PAGE_W - (r_box[2] - r_box[0])) // 2, y_offset + 6), "GENERAL PAPER & SUBJECT SECTION", font=f_bar, fill="#FFFFFF")
-            y_offset += 36
+            draw.text(((PAGE_W - (r_box[2] - r_box[0])) // 2, y_offset + 10), "GENERAL PAPER & SUBJECT SECTION", font=f_bar, fill="#FFFFFF")
+            y_offset += 75
         else:
-            y_offset = 60
+            y_offset = 120
+
         return img, draw, y_offset
 
     cur_img, cur_draw, start_y = create_new_page(is_first=True)
@@ -322,13 +334,14 @@ def generate_pdf_bytes(quiz_data):
 
     for i, q in enumerate(questions, 1):
         clean_q = clean_question_text(q.get('question', ''))
+        # केवल बॉट का क्रमिक नंबर छपेगा
         q_lines = wrap_text(f"{i}. {clean_q}", f_q, COL_W, cur_draw)
 
         opt_items = []
         for o_idx, opt in enumerate(q.get('options', [])):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
             c_opt = re.sub(r"^\s*[A-Ha-h1-9][\.\)\-:]\s*", "", opt)
-            wrapped = wrap_text(f"{lbl} {c_opt}", f_opt, COL_W - 15, cur_draw)
+            wrapped = wrap_text(f"{lbl} {c_opt}", f_opt, COL_W - 30, cur_draw)
             opt_items.append(wrapped)
 
         correct_idx = q.get('correct_id', 0)
@@ -336,7 +349,7 @@ def generate_pdf_bytes(quiz_data):
         answer_keys.append((f"{i}", c_lbl))
 
         tot_opt_lines = sum(len(x) for x in opt_items)
-        block_h = (len(q_lines) * 22) + (tot_opt_lines * 19) + 14
+        block_h = (len(q_lines) * 44) + (tot_opt_lines * 38) + 30
 
         if cur_y + block_h > (PAGE_H - MARGIN_Y):
             if cur_col == 0:
@@ -350,57 +363,59 @@ def generate_pdf_bytes(quiz_data):
                 cur_y = start_y
 
         col_x = MARGIN_X if cur_col == 0 else MARGIN_X + COL_W + COL_GAP
+
         for line in q_lines:
             cur_draw.text((col_x, cur_y), line, font=f_q, fill="#000000")
-            cur_y += 22
+            cur_y += 44
+
         for item in opt_items:
             for line in item:
-                cur_draw.text((col_x + 12, cur_y), line, font=f_opt, fill="#222222")
-                cur_y += 19
-        cur_y += 10
+                cur_draw.text((col_x + 24, cur_y), line, font=f_opt, fill="#222222")
+                cur_y += 38
+
+        cur_y += 24
 
     pages.append(cur_img)
 
     # Last Page Answer Key
     ans_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
     ans_draw = ImageDraw.Draw(ans_img)
-    ans_draw.text((MARGIN_X, 22), f"{creator.upper()} — ANSWER KEY & EVALUATION", font=f_sub, fill="#777777")
-    ans_draw.line([(MARGIN_X, 36), (PAGE_W - MARGIN_X, 36)], fill="#8B0000", width=2)
+    ans_draw.text((MARGIN_X, 45), f"{creator.upper()} — ANSWER KEY & EVALUATION", font=f_sub, fill="#666666")
+    ans_draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#8B0000", width=4)
 
-    ay = 60
+    ay = 120
     t_box = ans_draw.textbbox((0, 0), "ANSWER KEY / उत्तर तालिका", font=f_ans_title)
     ans_draw.text(((PAGE_W - (t_box[2] - t_box[0])) // 2, ay), "ANSWER KEY / उत्तर तालिका", font=f_ans_title, fill="#8B0000")
-    ay += 40
+    ay += 80
 
     sub_txt = f"{title}  |  Total Questions: {len(questions)}  |  Booklet Series: A"
     s_box = ans_draw.textbbox((0, 0), sub_txt, font=f_sub)
     ans_draw.text(((PAGE_W - (s_box[2] - s_box[0])) // 2, ay), sub_txt, font=f_sub, fill="#555555")
-    ay += 35
-    ans_draw.line([(MARGIN_X + 100, ay), (PAGE_W - MARGIN_X - 100, ay)], fill="#8B0000", width=1)
-    ay += 35
+    ay += 70
+    ans_draw.line([(MARGIN_X + 200, ay), (PAGE_W - MARGIN_X - 200, ay)], fill="#8B0000", width=2)
+    ay += 70
 
     cols = 5
-    usable_w = PAGE_W - (2 * MARGIN_X) - 40
+    usable_w = PAGE_W - (2 * MARGIN_X) - 80
     cw = usable_w // cols
-    sx = MARGIN_X + 20
+    sx = MARGIN_X + 40
 
     for idx, (qn, ans) in enumerate(answer_keys):
         c = idx % cols
         r = idx // cols
         ix = sx + (c * cw)
-        iy = ay + (r * 34)
-        ans_draw.rectangle([ix, iy, ix + cw - 15, iy + 28], outline="#CCCCCC", fill="#FDFDFD", width=1)
-        ans_draw.text((ix + 8, iy + 6), f"Q.{qn}", font=f_key, fill="#000000")
-        ans_draw.text((ix + cw - 45, iy + 6), ans, font=f_key, fill="#8B0000")
+        iy = ay + (r * 68)
+        ans_draw.rectangle([ix, iy, ix + cw - 30, iy + 56], outline="#CCCCCC", fill="#FDFDFD", width=2)
+        ans_draw.text((ix + 16, iy + 12), f"Q.{qn}", font=f_key, fill="#000000")
+        ans_draw.text((ix + cw - 90, iy + 12), ans, font=f_key, fill="#8B0000")
 
     pages.append(ans_img)
     pdf_io = io.BytesIO()
     if pages:
-        pages[0].save(pdf_io, format="PDF", save_all=True, append_images=pages[1:], resolution=150.0)
+        pages[0].save(pdf_io, format="PDF", save_all=True, append_images=pages[1:], resolution=300.0)
     pdf_io.seek(0)
     return pdf_io
-        
-# --- BOT LOGIC ---
+    # --- BOT LOGIC ---
 async def post_init(application):
     commands = [
         BotCommand("start", "Start the bot"),
@@ -480,9 +495,12 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
     explanation = poll.explanation if hasattr(poll, "explanation") and poll.explanation else ""
 
+    # प्रश्न से पुराने नंबर साफ करके स्टोर करें
+    cleaned_q = clean_question_text(poll.question)
+
     session = creator_sessions[user_id]
     session["questions"].append({
-        "question": poll.question,
+        "question": cleaned_q,
         "options": options,
         "correct_id": correct_id,
         "explanation": explanation
@@ -655,7 +673,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` नहीं मिला।")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ परीक्षा बुकलेट PDF तैयार हो रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ हाई-डेफिनिशन (Ultra HD) बुकलेट PDF तैयार हो रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
         safe_filename = f"{all_q[quiz_id].get('title', 'Exam')}_Booklet.pdf".replace(" ", "_")
@@ -728,6 +746,7 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
         exp_text = q.get("explanation", "") if show_exp else ""
         clean_q = clean_question_text(q['question'])
 
+        # ग्रुप में प्रश्न संख्या + टाइमर
         header_q = f"[{idx+1}/{len(quiz['questions'])}] ⏱ {timer_sec}s | {clean_q}"
         if len(header_q) > 300:
             header_q = header_q[:295] + "..."
@@ -869,4 +888,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
+    
