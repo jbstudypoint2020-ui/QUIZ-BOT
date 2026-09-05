@@ -39,28 +39,34 @@ TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
 ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
 
+# यहाँ आप अपना ब्रांड नाम या क्रिएटर नाम बदल सकते हैं
+DEFAULT_CREATOR_NAME = "Dr. Dev Kumar | JB STUDY POINT"
+
 def load_quizzes():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            pass
+            return {}
     return {}
 
 def save_quizzes(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving DB: {e}")
 
-QUIZZES = load_quizzes()
+ALL_QUIZZES = load_quizzes()
 user_states = {}
 active_creators = {}
 
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# हिंदी सपोर्टेड HTML से PDF जनरेटर
 def generate_pdf_bytes(quiz_data):
+    creator = quiz_data.get('creator', DEFAULT_CREATOR_NAME)
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -122,7 +128,7 @@ def generate_pdf_bytes(quiz_data):
     <body>
         <div class="header">
             <div class="title">{quiz_data.get('title', 'Quiz Test')}</div>
-            <div class="meta">Created by: {quiz_data.get('creator', 'Admin')} | Total Questions: {len(quiz_data.get('questions', []))}</div>
+            <div class="meta">👤 <b>Creator:</b> {creator} | 📚 Total Questions: {len(quiz_data.get('questions', []))}</div>
         </div>
     """
 
@@ -172,7 +178,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"🇮🇳 *नमस्ते {user.first_name}!*\n\n"
         "• नया क्विज़: `/create क्विज़ का नाम`\n"
-        "• सारे प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
+        "• प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
         "• सभी क्विज़ देखें: `/myquizzes`\n"
         "• PDF डाउनलोड करें: `/pdf QUIZ_ID`"
     )
@@ -186,9 +192,13 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     title = " ".join(context.args).strip() if context.args else "इतिहास टेस्ट"
     q_id = generate_quiz_id()
+    
+    # क्रिएटर का नाम सेट करना
+    creator_display = DEFAULT_CREATOR_NAME
+
     active_creators[user_id] = {
         "title": title,
-        "creator": update.effective_user.first_name,
+        "creator": creator_display,
         "type": "Free",
         "plays": 0,
         "questions": [],
@@ -196,10 +206,11 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     msg = (
-        f"✅ नया क्विज़: *'{title}'*\n"
-        f"🆔 ID: `{q_id}`\n\n"
-        "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करें।\n"
-        "अंत में **/done** भेजें।"
+        f"✅ नया क्विज़ सत्र शुरू हुआ: *'{title}'*\n"
+        f"🆔 ID: `{q_id}`\n"
+        f"👤 Creator: *{creator_display}*\n\n"
+        "👉 अब **@QuizBot** से जितने चाहे पोल सीधे फ़ॉरवर्ड करें।\n"
+        "सारे फ़ॉरवर्ड करने के बाद अंत में **/done** भेजें।"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -208,8 +219,8 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     if user_id not in active_creators:
         q_id = generate_quiz_id()
         active_creators[user_id] = {
-            "title": "History Quiz",
-            "creator": update.effective_user.first_name,
+            "title": "इतिहास टेस्ट",
+            "creator": DEFAULT_CREATOR_NAME,
             "type": "Free",
             "plays": 0,
             "questions": [],
@@ -230,6 +241,7 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     })
 
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global ALL_QUIZZES
     user_id = update.effective_user.id
     if user_id not in active_creators or not active_creators[user_id]["questions"]:
         await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। पहले पोल फ़ॉरवर्ड करें।", parse_mode="Markdown")
@@ -237,8 +249,9 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     quiz_data = active_creators[user_id]
     q_id = quiz_data["id"]
-    QUIZZES[q_id] = quiz_data
-    save_quizzes(QUIZZES)
+    
+    ALL_QUIZZES[q_id] = quiz_data
+    save_quizzes(ALL_QUIZZES)
     del active_creators[user_id]
 
     total_q = len(quiz_data["questions"])
@@ -246,7 +259,7 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🇮🇳 *Advance Quiz Bot*\n"
         f"🆔 **ID:** `{q_id}`\n"
         f"🏷 **Type:** Free\n"
-        f"📢 **Promo:** None\n"
+        f"📢 **Promo:** JB STUDY POINT\n"
         f"👤 **Creator:** {quiz_data['creator']}\n"
         f"📚 **Total Questions:** {total_q}\n"
         f"📝 **Name:** {quiz_data['title']}"
@@ -270,19 +283,25 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(card_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global ALL_QUIZZES
     if update.effective_user.id != ADMIN_ID:
         return
 
-    if not QUIZZES:
+    disk_data = load_quizzes()
+    if disk_data:
+        ALL_QUIZZES.update(disk_data)
+
+    if not ALL_QUIZZES:
         await update.message.reply_text("कोई क्विज़ मौजूद नहीं है।", parse_mode="Markdown")
         return
 
-    lines = [f"🧩 *Your Quizzes (Page 1)*\nTotal: {len(QUIZZES)}\n"]
-    for idx, (q_id, q_data) in enumerate(QUIZZES.items(), 1):
+    lines = [f"🧩 *Your Quizzes (Page 1)*\nTotal: {len(ALL_QUIZZES)}\n"]
+    for idx, (q_id, q_data) in enumerate(ALL_QUIZZES.items(), 1):
         lines.append(
-            f"*{idx}. {q_data['title']}*\n"
+            f"*{idx}. {q_data.get('title', 'Quiz')}*\n"
             f"🆔 ID: `{q_id}`\n"
-            f"📚 Questions: {len(q_data['questions'])}\n"
+            f"👤 Creator: {q_data.get('creator', DEFAULT_CREATOR_NAME)}\n"
+            f"📚 Questions: {len(q_data.get('questions', []))}\n"
             f"🎯 Play: `/play {q_id}`\n"
             f"📄 PDF: `/pdf {q_id}`\n"
             "--------------------------------"
@@ -291,25 +310,29 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ कृपया क्विज़ आईडी भी लिखें। उदाहरण: `/pdf GGN12345`", parse_mode="Markdown")
+        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/pdf GGN12345`", parse_mode="Markdown")
         return
     quiz_id = context.args[0].strip().upper()
     await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
 
 async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
-    if quiz_id not in QUIZZES or not QUIZZES[quiz_id]["questions"]:
+    global ALL_QUIZZES
+    if quiz_id not in ALL_QUIZZES:
+        ALL_QUIZZES.update(load_quizzes())
+
+    if quiz_id not in ALL_QUIZZES or not ALL_QUIZZES[quiz_id].get("questions"):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।", parse_mode="Markdown")
         return
 
     await context.bot.send_message(chat_id=chat_id, text="⏳ हिंदी पीडीएफ तैयार की जा रही है...")
-    pdf_buffer = generate_pdf_bytes(QUIZZES[quiz_id])
-    safe_filename = f"{QUIZZES[quiz_id]['title'].replace(' ', '_')}.pdf"
+    pdf_buffer = generate_pdf_bytes(ALL_QUIZZES[quiz_id])
+    safe_filename = f"{ALL_QUIZZES[quiz_id]['title'].replace(' ', '_')}.pdf"
     
     await context.bot.send_document(
         chat_id=chat_id,
         document=pdf_buffer,
         filename=safe_filename,
-        caption=f"📄 *{QUIZZES[quiz_id]['title']}*\n🆔 ID: `{quiz_id}`",
+        caption=f"📄 *{ALL_QUIZZES[quiz_id]['title']}*\n👤 Creator: {ALL_QUIZZES[quiz_id].get('creator', DEFAULT_CREATOR_NAME)}\n🆔 ID: `{quiz_id}`",
         parse_mode="Markdown"
     )
 
@@ -333,12 +356,16 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_quiz_pdf(query.message.chat_id, quiz_id, context)
 
 async def start_quiz_session(chat_id, user_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
-    if quiz_id not in QUIZZES or not QUIZZES[quiz_id]["questions"]:
+    global ALL_QUIZZES
+    if quiz_id not in ALL_QUIZZES:
+        ALL_QUIZZES.update(load_quizzes())
+
+    if quiz_id not in ALL_QUIZZES or not ALL_QUIZZES[quiz_id].get("questions"):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं हैं।", parse_mode="Markdown")
         return
 
-    QUIZZES[quiz_id]["plays"] = QUIZZES[quiz_id].get("plays", 0) + 1
-    save_quizzes(QUIZZES)
+    ALL_QUIZZES[quiz_id]["plays"] = ALL_QUIZZES[quiz_id].get("plays", 0) + 1
+    save_quizzes(ALL_QUIZZES)
 
     user_states[user_id] = {
         "quiz_id": quiz_id,
@@ -350,7 +377,7 @@ async def start_quiz_session(chat_id, user_id, quiz_id, context: ContextTypes.DE
 
 async def send_quiz_poll(user_id, context: ContextTypes.DEFAULT_TYPE):
     state = user_states[user_id]
-    quiz = QUIZZES[state["quiz_id"]]
+    quiz = ALL_QUIZZES[state["quiz_id"]]
     idx = state["index"]
 
     if idx < len(quiz["questions"]):
@@ -370,7 +397,7 @@ async def send_quiz_poll(user_id, context: ContextTypes.DEFAULT_TYPE):
         total = len(quiz["questions"])
         await context.bot.send_message(
             chat_id=state["chat_id"],
-            text=f"🏁 *टेस्ट समाप्त!*\n\n📝 क्विज़: *{quiz['title']}*\n🏆 आपका स्कोर: *{score} / {total}*\n\nधन्यवाद!",
+            text=f"🏁 *टेस्ट समाप्त!*\n\n📝 क्विज़: *{quiz['title']}*\n👤 क्रिएटर: *{quiz.get('creator', DEFAULT_CREATOR_NAME)}*\n🏆 आपका स्कोर: *{score} / {total}*\n\nधन्यवाद!",
             parse_mode="Markdown"
         )
 
@@ -406,4 +433,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+                               
