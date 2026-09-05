@@ -5,7 +5,7 @@ import string
 import io
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from fpdf import FPDF
+from PIL import Image, ImageDraw, ImageFont
 
 from telegram import (
     Update,
@@ -38,7 +38,6 @@ def run_dummy_server():
 TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
 ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
-
 DEFAULT_CREATOR = "Dr. Dev Kumar | JB STUDY POINT"
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -66,59 +65,108 @@ creator_sessions = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# PDF Generator using hindi.ttf
+# Pillow आधारित शत-प्रतिशत शुद्ध हिंदी PDF जनरेटर
 def generate_pdf_bytes(quiz_data):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-
-    if os.path.exists(FONT_PATH):
-        pdf.add_font("Devanagari", "", FONT_PATH)
-        font_name = "Devanagari"
-    else:
-        font_name = "Helvetica"
-
-    title = str(quiz_data.get('title', 'Quiz Test'))
+    title = str(quiz_data.get('title', 'इतिहास टेस्ट'))
     creator = str(quiz_data.get('creator', DEFAULT_CREATOR))
     questions = quiz_data.get('questions', [])
 
-    pdf.set_font(font_name, size=16)
-    pdf.set_text_color(26, 35, 126)
-    pdf.cell(0, 10, text=title, align="C", new_x="LMARGIN", new_y="NEXT")
+    PAGE_WIDTH = 1240
+    PAGE_HEIGHT = 1754
+    MARGIN = 70
+    CONTENT_WIDTH = PAGE_WIDTH - (2 * MARGIN)
 
-    pdf.set_font(font_name, size=10)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 6, text=f"Creator: {creator}  |  Questions: {len(questions)}  |  Timer: {quiz_data.get('timer', '20s')}", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
+    font_title = ImageFont.truetype(FONT_PATH, 38)
+    font_meta = ImageFont.truetype(FONT_PATH, 24)
+    font_q = ImageFont.truetype(FONT_PATH, 26)
+    font_opt = ImageFont.truetype(FONT_PATH, 23)
+    font_ans = ImageFont.truetype(FONT_PATH, 23)
+
+    def wrap_text(text, font, max_w, draw):
+        words = text.split()
+        lines = []
+        cur_line = ""
+        for word in words:
+            test = f"{cur_line} {word}".strip()
+            bbox = draw.textbbox((0, 0), test, font=font)
+            if (bbox[2] - bbox[0]) <= max_w:
+                cur_line = test
+            else:
+                if cur_line:
+                    lines.append(cur_line)
+                cur_line = word
+        if cur_line:
+            lines.append(cur_line)
+        return lines
+
+    pages = []
+    
+    def new_page():
+        img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), "#FFFFFF")
+        return img, ImageDraw.Draw(img)
+
+    cur_img, cur_draw = new_page()
+    y = MARGIN
+
+    # Title & Meta Header
+    t_bbox = cur_draw.textbbox((0, 0), title, font=font_title)
+    cur_draw.text(((PAGE_WIDTH - (t_bbox[2] - t_bbox[0])) // 2, y), title, font=font_title, fill="#1a237e")
+    y += 55
+
+    meta = f"Creator: {creator}  |  Questions: {len(questions)}  |  Timer: 20s"
+    m_bbox = cur_draw.textbbox((0, 0), meta, font=font_meta)
+    cur_draw.text(((PAGE_WIDTH - (m_bbox[2] - m_bbox[0])) // 2, y), meta, font=font_meta, fill="#666666")
+    y += 45
+    cur_draw.line([(MARGIN, y), (PAGE_WIDTH - MARGIN, y)], fill="#1a237e", width=2)
+    y += 30
 
     opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
 
     for i, q in enumerate(questions, 1):
-        pdf.set_font(font_name, size=11)
-        pdf.set_text_color(0, 0, 0)
-        q_text = f"Q{i}. {q.get('question', '')}"
-        pdf.multi_cell(0, 6, text=q_text, new_x="LMARGIN", new_y="NEXT")
-
-        options = q.get('options', [])
-        pdf.set_font(font_name, size=10)
-        pdf.set_text_color(40, 40, 40)
-        for o_idx, opt in enumerate(options):
+        q_lines = wrap_text(f"Q{i}. {q.get('question', '')}", font_q, CONTENT_WIDTH, cur_draw)
+        
+        opt_lines_list = []
+        for o_idx, opt in enumerate(q.get('options', [])):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            pdf.multi_cell(0, 5, text=f"   {lbl} {opt}", new_x="LMARGIN", new_y="NEXT")
+            wrapped = wrap_text(f"{lbl} {opt}", font_opt, CONTENT_WIDTH - 40, cur_draw)
+            opt_lines_list.append(wrapped)
 
         correct_idx = q.get('correct_id', 0)
         corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
-        correct_text = options[correct_idx] if correct_idx < len(options) else ""
+        options = q.get('options', [])
+        c_text = options[correct_idx] if correct_idx < len(options) else ""
+        ans_lines = wrap_text(f"Correct Answer: {corr_lbl} {c_text}", font_ans, CONTENT_WIDTH - 40, cur_draw)
 
-        pdf.set_font(font_name, size=10)
-        pdf.set_text_color(46, 125, 50)
-        pdf.multi_cell(0, 6, text=f"   Correct Answer: {corr_lbl} {correct_text}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(3)
+        total_opt_lines = sum(len(l) for l in opt_lines_list)
+        needed_height = (len(q_lines) * 38) + (total_opt_lines * 34) + (len(ans_lines) * 36) + 40
 
-    buffer = io.BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
-    return buffer
+        if y + needed_height > (PAGE_HEIGHT - MARGIN):
+            pages.append(cur_img)
+            cur_img, cur_draw = new_page()
+            y = MARGIN
+
+        for line in q_lines:
+            cur_draw.text((MARGIN, y), line, font=font_q, fill="#000000")
+            y += 38
+
+        for item_lines in opt_lines_list:
+            for line in item_lines:
+                cur_draw.text((MARGIN + 35, y), line, font=font_opt, fill="#2b2b2b")
+                y += 34
+
+        for line in ans_lines:
+            cur_draw.text((MARGIN + 35, y), line, font=font_ans, fill="#2e7d32")
+            y += 36
+
+        y += 22
+
+    pages.append(cur_img)
+
+    pdf_io = io.BytesIO()
+    if pages:
+        pages[0].save(pdf_io, format="PDF", save_all=True, append_images=pages[1:], resolution=150.0)
+    pdf_io.seek(0)
+    return pdf_io
 
 async def post_init(application):
     commands = [
@@ -309,7 +357,7 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/pdf GGN80C50L`")
+        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें।")
         return
     quiz_id = context.args[0].strip().upper()
     await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
@@ -320,7 +368,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ हिंदी पीडीएफ तैयार की जा रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ शुद्ध हिंदी पीडीएफ तैयार की जा रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
         safe_filename = f"{all_q[quiz_id].get('title', 'Quiz')}.pdf".replace(" ", "_")
