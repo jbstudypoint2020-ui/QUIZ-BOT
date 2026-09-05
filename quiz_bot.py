@@ -6,6 +6,9 @@ import string
 import io
 import asyncio
 import threading
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs
 from PIL import Image, ImageDraw, ImageFont
@@ -58,12 +61,47 @@ def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 def clean_question_text(raw_text):
-    # सभी तरह के पुराने नंबर जैसे [20/61], [ 6/25 ], Q1., 1., 1) को साफ़ करता है
     text = re.sub(r"^\s*\[\s*\d+\s*/\s*\d+\s*\]\s*", "", raw_text)
     text = re.sub(r"^\s*(?:Q|q|प्रश्न)?\s*\d+[\.\)\-:]\s*", "", text)
     text = re.sub(r"^\s*\[\s*\d+\s*\]\s*", "", text)
     text = re.sub(r"^\s*\(\s*\d+\s*\)\s*", "", text)
     return text.strip()
+
+# --- EMAIL BACKUP SENDER ---
+def send_quiz_email_backup(quiz_title, quiz_id, total_q, quiz_dict):
+    sender = os.environ.get("GMAIL_USER")
+    password = os.environ.get("GMAIL_PASS")
+    if not sender or not password:
+        return
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = sender
+        msg['To'] = sender
+        msg['Subject'] = f"📚 Test Backup: {quiz_title} ({quiz_id})"
+
+        body = (
+            f"नमस्ते,\n\n"
+            f"नया टेस्ट सफलतापूर्वक तैयार हो गया है और बैकअप सुरक्षित कर लिया गया है:\n\n"
+            f"• टेस्ट का नाम: {quiz_title}\n"
+            f"• Quiz ID: {quiz_id}\n"
+            f"• कुल प्रश्न: {total_q}\n"
+            f"• Telegram Play Command: /play {quiz_id}\n\n"
+            f"JSON बैकअप फ़ाइल नीचे अटैच की गई है।"
+        )
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+        json_str = json.dumps(quiz_dict, ensure_ascii=False, indent=2)
+        part = MIMEText(json_str, 'plain', 'utf-8')
+        part.add_header('Content-Disposition', f'attachment; filename="{quiz_id}.json"')
+        msg.attach(part)
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender, password.replace(" ", ""))
+            server.send_message(msg)
+        print(f"Backup email sent for {quiz_id}")
+    except Exception as e:
+        print(f"Failed to send email backup: {e}")
 
 # --- WEB SERVER ---
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -176,7 +214,7 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
             if questions:
                 q_id = generate_quiz_id()
                 all_q = get_all_quizzes()
-                all_q[q_id] = {
+                q_obj = {
                     "id": q_id,
                     "title": title,
                     "creator": creator,
@@ -185,8 +223,12 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
                     "timer": "20s",
                     "questions": questions
                 }
+                all_q[q_id] = q_obj
                 save_all_quizzes(all_q)
-                resp = f"<html><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
+
+                threading.Thread(target=send_quiz_email_backup, args=(title, q_id, len(questions), q_obj)).start()
+
+                resp = f"<html><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>बैकअप आपकी ईमेल पर भेज दिया गया है।</p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
             else:
                 resp = "<html><body><h3>कोई सवाल नहीं मिला।</h3><a href='/'>वापस</a></body></html>"
 
@@ -209,7 +251,6 @@ def generate_pdf_bytes(quiz_data):
     COL_GAP = 70
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
-    # High Resolution Crisp Fonts
     f_brand = ImageFont.truetype(FONT_PATH, 48)
     f_sub = ImageFont.truetype(FONT_PATH, 26)
     f_title = ImageFont.truetype(FONT_PATH, 46)
@@ -251,7 +292,6 @@ def generate_pdf_bytes(quiz_data):
         img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
         draw = ImageDraw.Draw(img)
 
-        # Header bar
         draw.text((MARGIN_X, 45), f"{creator.upper()} — MOCK TEST SERIES", font=f_sub, fill="#666666")
         draw.text((PAGE_W - MARGIN_X - 440, 45), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#666666")
         draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#CCCCCC", width=2)
@@ -259,7 +299,6 @@ def generate_pdf_bytes(quiz_data):
         y_offset = MARGIN_Y + 25
 
         if is_first:
-            # Exam Header Card
             draw.ellipse([MARGIN_X, y_offset, MARGIN_X + 96, y_offset + 96], outline="#8B0000", width=4)
             draw.text((MARGIN_X + 22, y_offset + 22), "JB", font=f_brand, fill="#8B0000")
             draw.text((MARGIN_X + 115, y_offset + 8), creator, font=f_brand, fill="#111111")
@@ -275,7 +314,6 @@ def generate_pdf_bytes(quiz_data):
             draw.text(((PAGE_W - (sub_b[2] - sub_b[0])) // 2, y_offset), "Paper - II : History Practice Booklet", font=f_sub, fill="#555555")
             y_offset += 50
 
-            # Table Header Grid
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 150], outline="#333333", width=2)
             draw.line([(MARGIN_X + 440, y_offset), (MARGIN_X + 440, y_offset + 150)], fill="#333333", width=2)
             draw.line([(PAGE_W - MARGIN_X - 640, y_offset), (PAGE_W - MARGIN_X - 640, y_offset + 150)], fill="#333333", width=2)
@@ -306,7 +344,6 @@ def generate_pdf_bytes(quiz_data):
             draw.text((PAGE_W - MARGIN_X - 620, y_offset + 104), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
             y_offset += 175
 
-            # Instructions
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 185], outline="#DDDDDD", width=2)
             draw.text((MARGIN_X + 30, y_offset + 12), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
             draw.text((MARGIN_X + 30, y_offset + 48), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
@@ -334,7 +371,6 @@ def generate_pdf_bytes(quiz_data):
 
     for i, q in enumerate(questions, 1):
         clean_q = clean_question_text(q.get('question', ''))
-        # केवल बॉट का क्रमिक नंबर छपेगा
         q_lines = wrap_text(f"{i}. {clean_q}", f_q, COL_W, cur_draw)
 
         opt_items = []
@@ -495,7 +531,6 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
     explanation = poll.explanation if hasattr(poll, "explanation") and poll.explanation else ""
 
-    # प्रश्न से पुराने नंबर साफ करके स्टोर करें
     cleaned_q = clean_question_text(poll.question)
 
     session = creator_sessions[user_id]
@@ -547,6 +582,9 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         save_all_quizzes(all_q)
 
         total_q = len(session["questions"])
+
+        threading.Thread(target=send_quiz_email_backup, args=(session["title"], q_id, total_q, session)).start()
+
         del creator_sessions[user_id]
 
         card_text = (
@@ -554,6 +592,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🏷 *Name:* {session['title']}\n"
             f"❓ *Questions:* {total_q}\n"
             f"🆔 *ID:* `{q_id}`\n"
+            f"📧 *Email Backup:* Sent!\n"
             f"🏷 *Type:* {session['type']}\n"
             f"👤 *Creator:* {session['creator']}"
         )
@@ -746,7 +785,6 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
         exp_text = q.get("explanation", "") if show_exp else ""
         clean_q = clean_question_text(q['question'])
 
-        # ग्रुप में प्रश्न संख्या + टाइमर
         header_q = f"[{idx+1}/{len(quiz['questions'])}] ⏱ {timer_sec}s | {clean_q}"
         if len(header_q) > 300:
             header_q = header_q[:295] + "..."
