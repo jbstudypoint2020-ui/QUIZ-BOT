@@ -34,6 +34,9 @@ ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
 DEFAULT_CREATOR = "JB STUDY POINT"
 
+GMAIL_USER = "jbstudypoint2020@gmail.com"
+GMAIL_PASS = "oqxsihlmuxmsztqw"
+
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_PATH = os.path.join(CURRENT_DIR, "hindi.ttf")
 
@@ -67,27 +70,21 @@ def clean_question_text(raw_text):
     text = re.sub(r"^\s*\(\s*\d+\s*\)\s*", "", text)
     return text.strip()
 
-# --- EMAIL BACKUP SENDER ---
 def send_quiz_email_backup(quiz_title, quiz_id, total_q, quiz_dict):
-    sender = os.environ.get("GMAIL_USER")
-    password = os.environ.get("GMAIL_PASS")
-    if not sender or not password:
-        return
-
     try:
         msg = MIMEMultipart()
-        msg['From'] = sender
-        msg['To'] = sender
+        msg['From'] = GMAIL_USER
+        msg['To'] = GMAIL_USER
         msg['Subject'] = f"📚 Test Backup: {quiz_title} ({quiz_id})"
 
         body = (
-            f"नमस्ते,\n\n"
-            f"नया टेस्ट सफलतापूर्वक तैयार हो गया है और बैकअप सुरक्षित कर लिया गया है:\n\n"
-            f"• टेस्ट का नाम: {quiz_title}\n"
+            f"नमस्ते डॉ देव कुमार जी,\n\n"
+            f"टेस्ट का बैकअप सुरक्षित कर लिया गया है:\n\n"
+            f"• शीर्षक: {quiz_title}\n"
             f"• Quiz ID: {quiz_id}\n"
             f"• कुल प्रश्न: {total_q}\n"
-            f"• Telegram Play Command: /play {quiz_id}\n\n"
-            f"JSON बैकअप फ़ाइल नीचे अटैच की गई है।"
+            f"• Telegram Play: /play {quiz_id}\n\n"
+            f"JSON डेटा अटैचमेंट में है।"
         )
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
@@ -97,16 +94,15 @@ def send_quiz_email_backup(quiz_title, quiz_id, total_q, quiz_dict):
         msg.attach(part)
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(sender, password.replace(" ", ""))
+            server.login(GMAIL_USER, GMAIL_PASS.strip())
             server.send_message(msg)
-        print(f"Backup email sent for {quiz_id}")
     except Exception as e:
-        print(f"Failed to send email backup: {e}")
+        print(f"Email error: {e}")
 
-# --- WEB SERVER ---
+# --- WEB CREATOR ---
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="hi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JB STUDY POINT - Quiz Creator</title>
+<title>JB STUDY POINT - Test Creator</title>
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, Roboto, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; }
 .box { max-width: 650px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
@@ -147,7 +143,7 @@ function addQuestion() {
 }
 </script></head><body>
 <div class="box">
-  <h2>JB STUDY POINT - Quiz Creator</h2>
+  <h2>JB STUDY POINT - Test Creator</h2>
   <form action="/save_quiz" method="POST">
     <input type="hidden" name="total_questions" id="total_q" value="1">
     <div class="field"><label>टेस्ट का नाम:</label><input type="text" name="title" value="इतिहास टेस्ट" required></div>
@@ -225,10 +221,9 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
                 }
                 all_q[q_id] = q_obj
                 save_all_quizzes(all_q)
-
                 threading.Thread(target=send_quiz_email_backup, args=(title, q_id, len(questions), q_obj)).start()
 
-                resp = f"<html><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>बैकअप आपकी ईमेल पर भेज दिया गया है।</p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
+                resp = f"<html><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>📧 बैकअप ईमेल पर भेजा गया।</p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
             else:
                 resp = "<html><body><h3>कोई सवाल नहीं मिला।</h3><a href='/'>वापस</a></body></html>"
 
@@ -242,7 +237,7 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
     server.serve_forever()
 
-# --- ULTRA HD 2-COLUMN BOOKLET PDF GENERATOR ---
+# --- 300 DPI ULTRA HD BOOKLET ---
 def generate_pdf_bytes(quiz_data):
     PAGE_W = 2480
     PAGE_H = 3508
@@ -413,7 +408,6 @@ def generate_pdf_bytes(quiz_data):
 
     pages.append(cur_img)
 
-    # Last Page Answer Key
     ans_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
     ans_draw = ImageDraw.Draw(ans_img)
     ans_draw.text((MARGIN_X, 45), f"{creator.upper()} — ANSWER KEY & EVALUATION", font=f_sub, fill="#666666")
@@ -451,13 +445,66 @@ def generate_pdf_bytes(quiz_data):
         pages[0].save(pdf_io, format="PDF", save_all=True, append_images=pages[1:], resolution=300.0)
     pdf_io.seek(0)
     return pdf_io
-    # --- BOT LOGIC ---
+
+# --- 100 QUESTIONS PRINTABLE OMR SHEET GENERATOR ---
+def generate_omr_sheet_bytes():
+    PAGE_W = 2480
+    PAGE_H = 3508
+    MARGIN_X = 120
+    MARGIN_Y = 100
+
+    img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
+    draw = ImageDraw.Draw(img)
+
+    f_title = ImageFont.truetype(FONT_PATH, 44)
+    f_sub = ImageFont.truetype(FONT_PATH, 24)
+    f_box = ImageFont.truetype(FONT_PATH, 22)
+    f_num = ImageFont.truetype(FONT_PATH, 22)
+    f_opt = ImageFont.truetype(FONT_PATH, 20)
+
+    # Header Card
+    draw.rectangle([MARGIN_X, MARGIN_Y, PAGE_W - MARGIN_X, MARGIN_Y + 180], outline="#8B0000", width=4)
+    draw.text((MARGIN_X + 40, MARGIN_Y + 25), "JB STUDY POINT — OMR ANSWER SHEET", font=f_title, fill="#8B0000")
+    draw.text((MARGIN_X + 40, MARGIN_Y + 90), "Use Blue or Black Ball Point Pen only. Darken the bubbles completely.", font=f_sub, fill="#444444")
+    draw.text((MARGIN_X + 40, MARGIN_Y + 130), "नाम (Name): _______________________   अनुक्रमांक (Roll No): ___________________", font=f_box, fill="#111111")
+
+    # 4 Columns of 25 Questions = 100 Questions
+    cols = 4
+    q_per_col = 25
+    col_w = (PAGE_W - (2 * MARGIN_X) - 150) // cols
+    sy = MARGIN_Y + 240
+
+    for c in range(cols):
+        cx = MARGIN_X + c * (col_w + 50)
+        draw.rectangle([cx, sy, cx + col_w, sy + (q_per_col * 110) + 40], outline="#CCCCCC", width=2)
+        draw.rectangle([cx, sy, cx + col_w, sy + 45], fill="#8B0000")
+        draw.text((cx + 15, sy + 8), f"Q.NO    A   B   C   D", font=f_box, fill="#FFFFFF")
+
+        qy = sy + 65
+        for row in range(q_per_col):
+            q_num = (c * q_per_col) + (row + 1)
+            draw.text((cx + 15, qy + 4), f"{q_num:02d}", font=f_num, fill="#111111")
+
+            ox = cx + 110
+            for opt_char in ["A", "B", "C", "D"]:
+                draw.ellipse([ox, qy, ox + 36, qy + 36], outline="#333333", width=2)
+                draw.text((ox + 10, qy + 6), opt_char, font=f_opt, fill="#333333")
+                ox += 65
+            qy += 110
+
+    pdf_io = io.BytesIO()
+    img.save(pdf_io, format="PDF", resolution=300.0)
+    pdf_io.seek(0)
+    return pdf_io
+    # --- BOT COMMANDS & GAME ENGINE ---
 async def post_init(application):
     commands = [
         BotCommand("start", "Start the bot"),
         BotCommand("create", "Create a new quiz"),
         BotCommand("done", "Complete quiz creation"),
         BotCommand("myquizzes", "View created quizzes"),
+        BotCommand("backup", "Send backup to email now"),
+        BotCommand("omr", "Download 100-Question OMR Sheet"),
     ]
     await application.bot.set_my_commands(commands)
 
@@ -473,10 +520,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         f"🇮🇳 *नमस्ते {user.first_name}!*\n\n"
-        "🌐 *Quiz Creator Web:* आप नीचे **Open App** पर टैप करके वेब से भी टेस्ट बना सकते हैं।\n\n"
+        "🌐 *Quiz Creator Web:* नीचे **Open App** पर टैप करके वेब से सीधे टेस्ट बनाएँ।\n\n"
         "• नया टेस्ट: `/create टेस्ट का नाम`\n"
         "• प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
         "• टेस्ट सूची: `/myquizzes`\n"
+        "• ईमेल पर बैकअप: `/backup`\n"
+        "• OMR शीट डाउनलोड करें: `/omr`\n"
         "• ग्रुप में चलायें: `/play QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
@@ -582,7 +631,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         save_all_quizzes(all_q)
 
         total_q = len(session["questions"])
-
         threading.Thread(target=send_quiz_email_backup, args=(session["title"], q_id, total_q, session)).start()
 
         del creator_sessions[user_id]
@@ -592,7 +640,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🏷 *Name:* {session['title']}\n"
             f"❓ *Questions:* {total_q}\n"
             f"🆔 *ID:* `{q_id}`\n"
-            f"📧 *Email Backup:* Sent!\n"
+            f"📧 *Email Backup:* Sent to {GMAIL_USER}\n"
             f"🏷 *Type:* {session['type']}\n"
             f"👤 *Creator:* {session['creator']}"
         )
@@ -609,14 +657,40 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         await update.message.reply_text(card_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    all_q = get_all_quizzes()
+    if not all_q:
+        await update.message.reply_text("❌ कोई टेस्ट मौजूद नहीं है।")
+        return
+
+    await update.message.reply_text(f"⏳ कुल {len(all_q)} टेस्टों का बैकअप {GMAIL_USER} पर भेजा जा रहा है...")
+    threading.Thread(target=send_quiz_email_backup, args=("All Tests Backup", "FULL_BACKUP", len(all_q), all_q)).start()
+    await update.message.reply_text("✅ बैकअप ईमेल भेज दिया गया है! कृपया अपना इनबॉक्स या Updates फ़ोल्डर देखें।")
+
+async def omr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ 100 प्रश्नों की प्रिंटेबल OMR शीट तैयार हो रही है...")
+    try:
+        omr_buffer = generate_omr_sheet_bytes()
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=omr_buffer,
+            filename="JB_STUDY_POINT_100Q_OMR_Sheet.pdf",
+            caption="📄 *100 प्रश्नों की प्रिंटेबल OMR शीट (300 DPI Ultra-HD)*\nप्रिंट करके ऑफलाइन अभ्यास के लिए उपयोग करें।"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ OMR त्रुटि: {str(e)}")
+
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/play GGN80C50L`")
+        await update.message.reply_text("❌ क्विज़ आईडी लिखें। उदाहरण: `/play GGN80C50L`")
         return
     quiz_id = context.args[0].strip().upper()
     await prompt_quiz_settings(update.effective_chat.id, quiz_id, update.effective_user.id, context)
 
-# --- TIMING & EXPLANATION SETTINGS ---
+# --- ADVANCED TEST SETTINGS ---
 async def prompt_quiz_settings(chat_id, quiz_id, host_user_id, context: ContextTypes.DEFAULT_TYPE):
     all_q = get_all_quizzes()
     if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
@@ -627,6 +701,7 @@ async def prompt_quiz_settings(chat_id, quiz_id, host_user_id, context: ContextT
         "quiz_id": quiz_id,
         "host_id": host_user_id,
         "timer": 20,
+        "negative": 0.0,
         "show_exp": False
     }
 
@@ -643,7 +718,7 @@ async def prompt_quiz_settings(chat_id, quiz_id, host_user_id, context: ContextT
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"⚙️ *टेस्ट सेटअप:* `{all_q[quiz_id]['title']}`\n\nकृपया **टाइमर (प्रति प्रश्न समय)** चुनें:",
+        text=f"⚙️ *टेस्ट सेटअप:* `{all_q[quiz_id]['title']}`\n\n1️⃣ **समय (टाइमर) चुनें:**",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -670,6 +745,37 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             pending_setups[chat_id]["timer"] = timer_val
 
+            neg_keyboard = [
+                [
+                    InlineKeyboardButton("0.0 (No Negative)", callback_data=f"set_neg_{chat_id}_0"),
+                    InlineKeyboardButton("-0.33 (1/3rd)", callback_data=f"set_neg_{chat_id}_33")
+                ],
+                [
+                    InlineKeyboardButton("-0.50 (1/2)", callback_data=f"set_neg_{chat_id}_50"),
+                    InlineKeyboardButton("-0.25 (1/4th)", callback_data=f"set_neg_{chat_id}_25")
+                ]
+            ]
+            await query.edit_message_text(
+                text=f"⏱ समय: *{timer_val}s*\n\n2️⃣ **निगेटिव मार्किंग (Negative Marking) चुनें:**",
+                reply_markup=InlineKeyboardMarkup(neg_keyboard),
+                parse_mode="Markdown"
+            )
+
+    elif data.startswith("set_neg_"):
+        parts = data.split("_")
+        chat_id = int(parts[2])
+        neg_code = parts[3]
+
+        neg_map = {"0": 0.0, "33": 0.33, "50": 0.50, "25": 0.25}
+        neg_val = neg_map.get(neg_code, 0.0)
+
+        if chat_id in pending_setups:
+            if user_id != pending_setups[chat_id]["host_id"] and user_id != ADMIN_ID:
+                await query.answer("❌ केवल एडमिन ही यह चुन सकते हैं।", show_alert=True)
+                return
+
+            pending_setups[chat_id]["negative"] = neg_val
+
             exp_keyboard = [
                 [
                     InlineKeyboardButton("✅ हाँ (Show)", callback_data=f"set_exp_{chat_id}_yes"),
@@ -677,7 +783,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             ]
             await query.edit_message_text(
-                text=f"⏱ समय: *{timer_val} सेकंड* चुना गया।\n\nक्या आप **व्याख्या (Explanation)** दिखाना चाहते हैं?",
+                text=f"⏱ समय: *{pending_setups[chat_id]['timer']}s* | निगेटिव: *{neg_val}*\n\n3️⃣ **व्याख्या (Explanation) दिखाना चाहते हैं?**",
                 reply_markup=InlineKeyboardMarkup(exp_keyboard),
                 parse_mode="Markdown"
             )
@@ -696,11 +802,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             setup_data = pending_setups[chat_id]
             q_id = setup_data["quiz_id"]
             t_sec = setup_data["timer"]
+            neg_val = setup_data["negative"]
             s_exp = setup_data["show_exp"]
 
             del pending_setups[chat_id]
-            await query.edit_message_text(f"✅ सेटअप पूरा हुआ! (समय: {t_sec}s | व्याख्या: {'हाँ' if s_exp else 'नहीं'})")
-            await start_group_quiz(chat_id, q_id, t_sec, s_exp, context)
+            await query.edit_message_text(f"✅ सेटअप पूरा हुआ! (समय: {t_sec}s | निगेटिव: -{neg_val} | व्याख्या: {'हाँ' if s_exp else 'नहीं'})")
+            await start_group_quiz(chat_id, q_id, t_sec, neg_val, s_exp, context)
 
     elif data.startswith("pdf_"):
         quiz_id = data.replace("pdf_", "")
@@ -712,7 +819,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` नहीं मिला।")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ हाई-डेफिनिशन (Ultra HD) बुकलेट PDF तैयार हो रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ हाई-डेफिनिशन (300 DPI) बुकलेट PDF तैयार हो रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
         safe_filename = f"{all_q[quiz_id].get('title', 'Exam')}_Booklet.pdf".replace(" ", "_")
@@ -728,7 +835,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ PDF त्रुटि: {str(e)}")
 
 # --- AUTO GROUP RUNNER ---
-async def start_group_quiz(chat_id, quiz_id, timer_sec, show_exp, context: ContextTypes.DEFAULT_TYPE):
+async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, context: ContextTypes.DEFAULT_TYPE):
     all_q = get_all_quizzes()
     quiz = all_q[quiz_id]
     total = len(quiz["questions"])
@@ -737,6 +844,7 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, show_exp, context: Conte
         "quiz_id": quiz_id,
         "index": 0,
         "timer": int(timer_sec),
+        "negative": neg_val,
         "show_exp": show_exp,
         "users": {},
         "current_msg_id": None,
@@ -747,7 +855,8 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, show_exp, context: Conte
         f"🎯 *टेस्ट शुरू हो रहा है!*\n\n"
         f"📝 टेस्ट: *{quiz['title']}*\n"
         f"❓ कुल प्रश्न: *{total}*\n"
-        f"⏱ समय: *{timer_sec} सेकंड प्रति प्रश्न*\n"
+        f"⏱ समय: *{timer_sec}s प्रति प्रश्न*\n"
+        f"⚠️ निगेटिव मार्किंग: *{'-' + str(neg_val) if neg_val > 0 else 'नहीं (0)'}*\n"
         f"💡 व्याख्या: *{'सक्रिय (ON)' if show_exp else 'बंद (OFF)'}*\n\n"
         "⚡ *पहला प्रश्न 3 सेकंड में आ रहा है... तैयार रहें!*"
     )
@@ -812,8 +921,7 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
             )
 
         sess["current_msg_id"] = poll_msg.message_id
-        context.bot_data[poll_msg.poll.id] = (chat_id, int(q["correct_id"]))
-
+        context.bot_data[poll_msg.poll.id] = (chat_id, int(q["correct_id"]), idx)
         asyncio.create_task(auto_timer_countdown(chat_id, poll_msg.message_id, timer_sec, context))
     else:
         await finish_quiz_and_show_ranks(chat_id, context)
@@ -824,17 +932,37 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user = p_ans.user
 
     if poll_id in context.bot_data:
-        chat_id, correct_id = context.bot_data[poll_id]
+        chat_id, correct_id, q_idx = context.bot_data[poll_id]
         if chat_id in active_group_quizzes:
             sess = active_group_quizzes[chat_id]
             uid = user.id
             name = user.first_name or "Participant"
 
             if uid not in sess["users"]:
-                sess["users"][uid] = {"name": name, "score": 0}
+                sess["users"][uid] = {
+                    "name": name,
+                    "correct": 0,
+                    "wrong": 0,
+                    "score": 0.0,
+                    "wrong_questions": []
+                }
 
-            if p_ans.option_ids and p_ans.option_ids[0] == correct_id:
-                sess["users"][uid]["score"] += 1
+            if p_ans.option_ids:
+                user_choice = p_ans.option_ids[0]
+                if user_choice == correct_id:
+                    sess["users"][uid]["correct"] += 1
+                    sess["users"][uid]["score"] += 1.0
+                else:
+                    sess["users"][uid]["wrong"] += 1
+                    sess["users"][uid]["score"] -= sess["negative"]
+                    # छात्र द्वारा गलत किए गए प्रश्न को रिकॉर्ड करना
+                    all_q = get_all_quizzes()
+                    q_data = all_q[sess["quiz_id"]]["questions"][q_idx]
+                    sess["users"][uid]["wrong_questions"].append({
+                        "q_num": q_idx + 1,
+                        "question": q_data["question"],
+                        "correct_opt": q_data["options"][correct_id]
+                    })
 
 async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in active_group_quizzes:
@@ -845,39 +973,76 @@ async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE
     quiz = all_q[sess["quiz_id"]]
     total_q = sess["total_q"]
     participants = sess["users"]
+    neg_rate = sess["negative"]
 
     del active_group_quizzes[chat_id]
 
     if not participants:
-        res_text = (
-            f"🏁 *टेस्ट समाप्त!*\n\n"
-            f"📝 टेस्ट: *{quiz['title']}*\n"
-            "⚠️ किसी भी प्रतिभागी ने प्रश्नों का उत्तर नहीं दिया।"
-        )
-        await context.bot.send_message(chat_id=chat_id, text=res_text, parse_mode="Markdown")
+        await context.bot.send_message(chat_id=chat_id, text=f"🏁 *टेस्ट समाप्त!*\n📝 *{quiz['title']}*\nकिसी ने उत्तर नहीं दिया।", parse_mode="Markdown")
         return
 
-    sorted_users = sorted(participants.values(), key=lambda x: x["score"], reverse=True)
+    sorted_users = sorted(participants.items(), key=lambda x: x[1]["score"], reverse=True)
 
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     leaderboard_lines = []
 
-    for rank, p in enumerate(sorted_users, 1):
+    # संभावित कट-ऑफ की गणना
+    highest_score = max(0.0, round(sorted_users[0][1]["score"], 2))
+    gen_cut = round(highest_score * 0.75, 2)
+    obc_cut = round(highest_score * 0.68, 2)
+    sc_cut = round(highest_score * 0.58, 2)
+
+    for rank, (uid, p) in enumerate(sorted_users, 1):
         badge = medals[rank - 1] if rank <= 10 else f"{rank}."
-        leaderboard_lines.append(f"{badge} *{p['name']}* — {p['score']}/{total_q} सही")
+        final_sc = max(0.0, round(p['score'], 2))
+        leaderboard_lines.append(f"{badge} *{p['name']}* — {final_sc}/{total_q} अंक (✅{p['correct']} | ❌{p['wrong']})")
+
+        # छात्र को विस्तृत व्यक्तिगत समीक्षा व गलत प्रश्नों की सूची भेजना
+        try:
+            wrong_review = ""
+            if p["wrong_questions"]:
+                wrong_review = "\n\n❌ *आपके द्वारा गलत किए गए प्रश्न व सही उत्तर:*\n"
+                for w in p["wrong_questions"][:10]:
+                    wrong_review += f"• *प्र.{w['q_num']}:* {w['question'][:60]}...\n👉 *सही उत्तर:* `{w['correct_opt']}`\n"
+                if len(p["wrong_questions"]) > 10:
+                    wrong_review += f"\n...और {len(p['wrong_questions']) - 10} अन्य गलत प्रश्न।"
+
+            student_card = (
+                f"📋 *आपका परीक्षा परिणाम (Detailed Scorecard)*\n\n"
+                f"📝 टेस्ट: *{quiz['title']}*\n"
+                f"🏆 रैंक: *#{rank}*\n"
+                f"✅ सही उत्तर: *{p['correct']}*\n"
+                f"❌ गलत उत्तर: *{p['wrong']}*\n"
+                f"⚠️ निगेटिव कटे अंक: *{round(p['wrong'] * neg_rate, 2)}*\n"
+                f"🎯 कुल प्राप्तांक: *{final_sc} / {total_q}*\n"
+                f"{wrong_review}\n\n"
+                f"💐 *{quiz.get('creator', DEFAULT_CREATOR)} की ओर से शुभकामनाएँ!*"
+            )
+            await context.bot.send_message(chat_id=uid, text=student_card, parse_mode="Markdown")
+        except Exception:
+            pass
 
     rank_list_text = "\n".join(leaderboard_lines)
 
-    final_result_message = (
+    cutoff_card = (
+        f"\n\n📊 *अनुमानित कट-ऑफ (Estimated Cut-Off):*\n"
+        f"• UR (General): *{gen_cut}*\n"
+        f"• OBC / EWS: *{obc_cut}*\n"
+        f"• SC / ST: *{sc_cut}*"
+    )
+
+    final_msg = (
         f"🏁 *टेस्ट परिणाम (Final Result)* 🏁\n\n"
         f"📝 टेस्ट: *{quiz['title']}*\n"
         f"❓ कुल प्रश्न: *{total_q}*\n"
-        f"👥 कुल प्रतिभागी: *{len(sorted_users)}*\n\n"
+        f"👥 कुल प्रतिभागी: *{len(sorted_users)}*\n"
+        f"⚠️ निगेटिव मार्किंग: *{'-' + str(neg_rate) if neg_rate > 0 else 'शून्य'}*\n\n"
         f"🏆 *रैंक व लीडरबोर्ड:*\n\n"
-        f"{rank_list_text}\n\n"
-        f"💐 *सभी प्रतिभागियों को बहुत-बहुत बधाई!*"
+        f"{rank_list_text}"
+        f"{cutoff_card}\n\n"
+        f"📩 *सभी प्रतिभागियों को व्यक्तिगत समीक्षा व स्कोरकार्ड भेज दिया गया है।*"
     )
-    await context.bot.send_message(chat_id=chat_id, text=final_result_message, parse_mode="Markdown")
+    await context.bot.send_message(chat_id=chat_id, text=final_msg, parse_mode="Markdown")
 
 async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -917,6 +1082,8 @@ def main():
     app.add_handler(CommandHandler("myquizzes", my_quizzes))
     app.add_handler(CommandHandler("play", play_command))
     app.add_handler(CommandHandler("pdf", pdf_command))
+    app.add_handler(CommandHandler("omr", omr_command))
+    app.add_handler(CommandHandler("backup", backup_command))
     app.add_handler(MessageHandler(filters.POLL, handle_incoming_poll))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     app.add_handler(CallbackQueryHandler(button_click))
@@ -926,4 +1093,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
