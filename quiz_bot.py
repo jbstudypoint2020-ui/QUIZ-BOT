@@ -465,11 +465,11 @@ async def prompt_quiz_settings(chat_id, quiz_id, host_user_id, context: ContextT
     keyboard = [
         [
             InlineKeyboardButton("⏱ 15s", callback_data=f"set_time_{chat_id}_15"),
-            InlineKeyboardButton("⏱ 20s", callback_data=f"set_time_{chat_id}_20"),
+            InlineKeyboardButton("⏱ 20s", callback_data=f"set_time_{chat_id}_20")
         ],
         [
             InlineKeyboardButton("⏱ 25s", callback_data=f"set_time_{chat_id}_25"),
-            InlineKeyboardButton("⏱ 30s", callback_data=f"set_time_{chat_id}_30"),
+            InlineKeyboardButton("⏱ 30s", callback_data=f"set_time_{chat_id}_30")
         ]
     ]
 
@@ -505,4 +505,4 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             exp_keyboard = [
                 [
                     InlineKeyboardButton("✅ हाँ (Show)", callback_data=f"set_exp_{chat_id}_yes"),
-                    InlineK
+                    InlineKey
