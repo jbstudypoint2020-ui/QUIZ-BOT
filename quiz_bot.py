@@ -2,6 +2,12 @@ import json
 import os
 import random
 import string
+import io
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -37,18 +43,95 @@ def save_quizzes(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 QUIZZES = load_quizzes()
-
 WAIT_TITLE, WAIT_QUESTION = range(2)
 user_states = {}
 
 def generate_quiz_id():
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+# PDF जनरेट करने का फंक्शन
+def generate_pdf_bytes(quiz_data):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#1a237e"),
+        alignment=1,
+        spaceAfter=15
+    )
+    meta_style = ParagraphStyle(
+        'MetaStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=14,
+        textColor=colors.dimgrey,
+        alignment=1,
+        spaceAfter=20
+    )
+    q_style = ParagraphStyle(
+        'QStyle',
+        parent=styles['Normal'],
+        fontSize=11,
+        leading=15,
+        textColor=colors.black,
+        spaceBefore=10,
+        spaceAfter=5
+    )
+    opt_style = ParagraphStyle(
+        'OptStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor("#333333"),
+        leftIndent=15,
+        spaceAfter=3
+    )
+    ans_style = ParagraphStyle(
+        'AnsStyle',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#2e7d32"),
+        leftIndent=15,
+        spaceAfter=8
+    )
+
+    story = []
+    # हेडर
+    story.append(Paragraph(f"<b>{quiz_data['title']}</b>", title_style))
+    story.append(Paragraph(f"Created by: {quiz_data['creator']} | Total Questions: {len(quiz_data['questions'])}", meta_style))
+    story.append(Spacer(1, 10))
+
+    # प्रश्न और विकल्प
+    for i, q in enumerate(quiz_data['questions'], 1):
+        q_text = f"<b>Q{i}. {q['question']}</b>"
+        story.append(Paragraph(q_text, q_style))
+        
+        opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)"]
+        for o_idx, opt in enumerate(q['options']):
+            lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
+            story.append(Paragraph(f"{lbl} {opt}", opt_style))
+        
+        correct_idx = q.get('correct_id', 0)
+        corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
+        correct_text = q['options'][correct_idx] if correct_idx < len(q['options']) else ""
+        story.append(Paragraph(f"<b>Correct Answer:</b> {corr_lbl} {correct_text}", ans_style))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 async def post_init(application):
     commands = [
         BotCommand("start", "Start the bot / check if alive"),
         BotCommand("create", "Start creating a quiz"),
-        BotCommand("features", "View all features of the bot"),
+        BotCommand("myquizzes", "View all your created quizzes"),
+        BotCommand("features", "View all features"),
     ]
     await application.bot.set_my_commands(commands)
 
@@ -63,25 +146,70 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         f"🇮🇳 *नमस्ते {user.first_name}!*\n\n"
-        "यह एक एडवांस क्विज़ सिस्टम है।\n"
-        "• नया क्विज़ बनाने के लिए: /create दबाएं\n"
-        "• फीचर्स देखने के लिए: /features दबाएं"
+        "• नया क्विज़ बनाने के लिए: /create\n"
+        "• सभी क्विज़ देखने के लिए: /myquizzes\n"
+        "• किसी क्विज़ आईडी से खेलने के लिए: `/play QUIZ_ID`\n"
+        "• पीडीएफ निकालने के लिए: `/pdf QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
-async def features(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "✨ *बॉट के मुख्य फीचर्स:*\n\n"
-        "1. 🎯 *बिना शेयर बटन और बिना उत्तर व्याख्या के परीक्षा*\n"
-        "2. ➕ *सीधे @QuizBot से पोल फ़ॉरवर्ड करके प्रश्न जोड़ें*\n"
-        "3. 📊 *तुरंत स्कोरकार्ड और परिणाम*\n"
-        "4. 📝 *खुद का टेस्ट कभी भी बनाने की सुविधा*"
+async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if not QUIZZES:
+        await update.message.reply_text("कोई क्विज़ मौजूद नहीं है। /create दबाकर नया बनाएं।")
+        return
+
+    lines = [f"🧩 *Your Quizzes (Page 1)*\nTotal: {len(QUIZZES)}\n"]
+    for idx, (q_id, q_data) in enumerate(QUIZZES.items(), 1):
+        plays = q_data.get("plays", 0)
+        lines.append(
+            f"*{idx}. {q_data['title']}*\n"
+            f"🆔 ID: `{q_id}`\n"
+            f"▶️ Plays: {plays}\n"
+            f"🎯 Play: `/play {q_id}`\n"
+            f"📄 PDF: `/pdf {q_id}`\n"
+            "--------------------------------"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ कृपया क्विज़ आईडी भी लिखें। उदाहरण: `/pdf GGN12345`", parse_mode="Markdown")
+        return
+
+    quiz_id = context.args[0].strip().upper()
+    await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
+
+async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
+    if quiz_id not in QUIZZES or not QUIZZES[quiz_id]["questions"]:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।", parse_mode="Markdown")
+        return
+
+    await context.bot.send_message(chat_id=chat_id, text="⏳ पीडीएफ तैयार की जा रही है, कृपया प्रतीक्षा करें...")
+    pdf_buffer = generate_pdf_bytes(QUIZZES[quiz_id])
+    safe_filename = f"{QUIZZES[quiz_id]['title'].replace(' ', '_')}.pdf"
+    
+    await context.bot.send_document(
+        chat_id=chat_id,
+        document=pdf_buffer,
+        filename=safe_filename,
+        caption=f"📄 *{QUIZZES[quiz_id]['title']}*\n🆔 ID: `{quiz_id}`",
+        parse_mode="Markdown"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/play GGN12345`", parse_mode="Markdown")
+        return
+
+    quiz_id = context.args[0].strip().upper()
+    await start_quiz_session(update.effective_chat.id, update.effective_user.id, quiz_id, context)
 
 async def create_quiz_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ केवल एडमिन ही नया क्विज़ बना सकते हैं।")
+        await update.message.reply_text("❌ केवल एडमिन ही क्विज़ बना सकते हैं।")
         return ConversationHandler.END
 
     await update.message.reply_text("📝 *नया क्विज़ बनाएँ*\n\nकृपया अपने क्विज़ का नाम (Title) लिखकर भेजें:", parse_mode="Markdown")
@@ -95,6 +223,7 @@ async def get_quiz_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "title": title,
         "creator": update.effective_user.first_name,
         "type": "Free",
+        "plays": 0,
         "questions": []
     }
     context.user_data["current_quiz_id"] = quiz_id
@@ -102,13 +231,12 @@ async def get_quiz_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_msg = (
         f"✅ क्विज़ *'{title}'* बन गया है!\n"
         f"🆔 ID: `{quiz_id}`\n\n"
-        "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करें या टेक्स्ट में भेजें।\n\n"
-        "पूरा होने पर **/done** भेजें।"
+        "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करें या टेक्स्ट प्रारूप में भेजें।\n\n"
+        "सभी प्रश्न जोड़ने के बाद **/done** भेजें।"
     )
     await update.message.reply_text(help_msg, parse_mode="Markdown")
     return WAIT_QUESTION
 
-# पोल फ़ॉरवर्ड हैंडलर
 async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_id = context.user_data.get("current_quiz_id")
     if not quiz_id or quiz_id not in QUIZZES:
@@ -130,10 +258,9 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     save_quizzes(QUIZZES)
 
     total_q = len(QUIZZES[quiz_id]["questions"])
-    await update.message.reply_text(f"✅ {total_q} question(s) saved from polls! ➡️ Send more or /done")
+    await update.message.reply_text(f"✅ {total_q} question(s) saved! ➡️ Send more or /done")
     return WAIT_QUESTION
 
-# टेक्स्ट प्रश्न हैंडलर
 async def handle_incoming_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     quiz_id = context.user_data.get("current_quiz_id")
@@ -190,6 +317,7 @@ async def create_quiz_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("▶️ Start", callback_data=f"play_{quiz_id}")],
+        [InlineKeyboardButton("📄 Download PDF", callback_data=f"pdf_{quiz_id}")],
         [InlineKeyboardButton("➕ Add to Group", url=add_group_url)],
         [InlineKeyboardButton("📩 Share", url=share_url)],
         [
@@ -209,11 +337,17 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("play_"):
         quiz_id = data.replace("play_", "")
         await start_quiz_session(query.message.chat_id, query.from_user.id, quiz_id, context)
+    elif data.startswith("pdf_"):
+        quiz_id = data.replace("pdf_", "")
+        await send_quiz_pdf(query.message.chat_id, quiz_id, context)
 
 async def start_quiz_session(chat_id, user_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
     if quiz_id not in QUIZZES or not QUIZZES[quiz_id]["questions"]:
-        await context.bot.send_message(chat_id=chat_id, text="❌ यह क्विज़ उपलब्ध नहीं है या इसमें कोई प्रश्न नहीं हैं।")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं हैं।", parse_mode="Markdown")
         return
+
+    QUIZZES[quiz_id]["plays"] = QUIZZES[quiz_id].get("plays", 0) + 1
+    save_quizzes(QUIZZES)
 
     user_states[user_id] = {
         "quiz_id": quiz_id,
@@ -280,7 +414,9 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("features", features))
+    app.add_handler(CommandHandler("myquizzes", my_quizzes))
+    app.add_handler(CommandHandler("play", play_command))
+    app.add_handler(CommandHandler("pdf", pdf_command))
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
