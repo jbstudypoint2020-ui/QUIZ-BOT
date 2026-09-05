@@ -1,3 +1,4 @@
+    
 import json
 import os
 import random
@@ -6,13 +7,7 @@ import io
 import urllib.request
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
-from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from fpdf import FPDF
 
 from telegram import (
     Update,
@@ -47,28 +42,18 @@ ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
 DEFAULT_CREATOR_NAME = "Dr. Dev Kumar | JB STUDY POINT"
 
-# हिंदी देवनागरी फ़ॉन्ट सेटअप
-FONT_PATH = "NotoSansDevanagari.ttf"
-FONT_NAME = "NotoSansDevanagari"
+FONT_PATH = "FreeSerif.ttf"
 
-def setup_hindi_font():
-    global FONT_NAME
+def download_hindi_font():
     if not os.path.exists(FONT_PATH):
         try:
-            # Google Fonts से देवनागरी फ़ॉन्ट डाउनलोड
-            url = "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari-Regular.ttf"
+            # GNU FreeSerif फ़ॉन्ट - संपूर्ण हिंदी/देवनागरी यूनिकोड सपोर्ट
+            url = "https://raw.githubusercontent.com/sensboston/sensboston.github.io/master/FreeSerif.ttf"
             urllib.request.urlretrieve(url, FONT_PATH)
         except Exception as e:
             print(f"Font download error: {e}")
-            FONT_NAME = "Helvetica"
-            return
-    try:
-        pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
-    except Exception as e:
-        print(f"Font register error: {e}")
-        FONT_NAME = "Helvetica"
 
-setup_hindi_font()
+download_hindi_font()
 
 def load_quizzes():
     if os.path.exists(DB_FILE):
@@ -93,94 +78,59 @@ active_creators = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# साफ़ हिंदी समर्थित PDF जनरेटर
+# fpdf2 आधारित साफ़ हिंदी PDF जनरेटर
 def generate_pdf_bytes(quiz_data):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=letter,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
 
-    styles = getSampleStyleSheet()
+    if os.path.exists(FONT_PATH):
+        pdf.add_font("HindiFont", "", FONT_PATH)
+        font_name = "HindiFont"
+    else:
+        font_name = "Helvetica"
 
-    title_style = ParagraphStyle(
-        'H_Title',
-        fontName=FONT_NAME,
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor("#1a237e"),
-        alignment=1,
-        spaceAfter=12
-    )
-    meta_style = ParagraphStyle(
-        'H_Meta',
-        fontName=FONT_NAME,
-        fontSize=10,
-        leading=14,
-        textColor=colors.dimgrey,
-        alignment=1,
-        spaceAfter=18
-    )
-    q_style = ParagraphStyle(
-        'H_Q',
-        fontName=FONT_NAME,
-        fontSize=11,
-        leading=16,
-        textColor=colors.black,
-        spaceBefore=10,
-        spaceAfter=4
-    )
-    opt_style = ParagraphStyle(
-        'H_Opt',
-        fontName=FONT_NAME,
-        fontSize=10,
-        leading=15,
-        textColor=colors.HexColor("#222222"),
-        leftIndent=15,
-        spaceAfter=3
-    )
-    ans_style = ParagraphStyle(
-        'H_Ans',
-        fontName=FONT_NAME,
-        fontSize=10,
-        leading=14,
-        textColor=colors.HexColor("#2e7d32"),
-        leftIndent=15,
-        spaceAfter=8
-    )
-
-    story = []
+    # Header / Title
     title = quiz_data.get('title', 'Quiz Test')
     creator = quiz_data.get('creator', DEFAULT_CREATOR_NAME)
     questions = quiz_data.get('questions', [])
 
-    story.append(Paragraph(f"<b>{title}</b>", title_style))
-    story.append(Paragraph(f"👤 Creator: {creator}  |  📚 Total Questions: {len(questions)}", meta_style))
-    story.append(Spacer(1, 8))
+    pdf.set_font(font_name, size=16)
+    pdf.set_text_color(26, 35, 126)
+    pdf.cell(0, 10, text=title, align="C", new_x="LMARGIN", new_y="NEXT")
 
+    pdf.set_font(font_name, size=10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, text=f"Creator: {creator}  |  Total Questions: {len(questions)}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+
+    # Questions & Options
     opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
 
     for i, q in enumerate(questions, 1):
-        clean_q = q['question'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        story.append(Paragraph(f"<b>Q{i}. {clean_q}</b>", q_style))
+        pdf.set_font(font_name, size=11)
+        pdf.set_text_color(0, 0, 0)
+        q_line = f"Q{i}. {q['question']}"
+        pdf.multi_cell(0, 6, text=q_line, new_x="LMARGIN", new_y="NEXT")
 
         options = q.get('options', [])
+        pdf.set_font(font_name, size=10)
+        pdf.set_text_color(40, 40, 40)
         for o_idx, opt in enumerate(options):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            clean_opt = opt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            story.append(Paragraph(f"{lbl} {clean_opt}", opt_style))
+            pdf.multi_cell(0, 5, text=f"   {lbl} {opt}", new_x="LMARGIN", new_y="NEXT")
 
         correct_idx = q.get('correct_id', 0)
         corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
         correct_text = options[correct_idx] if correct_idx < len(options) else ""
-        clean_ans = correct_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        story.append(Paragraph(f"<b>Correct Answer:</b> {corr_lbl} {clean_ans}", ans_style))
 
-    doc.build(story)
+        pdf.set_font(font_name, size=10)
+        pdf.set_text_color(46, 125, 50)
+        pdf.multi_cell(0, 6, text=f"   Correct Answer: {corr_lbl} {correct_text}", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
+
+    buffer = io.BytesIO()
+    pdf.output(buffer)
     buffer.seek(0)
     return buffer
 
@@ -219,11 +169,10 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     title = " ".join(context.args).strip() if context.args else "इतिहास टेस्ट"
     q_id = generate_quiz_id()
-    creator_display = DEFAULT_CREATOR_NAME
 
     active_creators[user_id] = {
         "title": title,
-        "creator": creator_display,
+        "creator": DEFAULT_CREATOR_NAME,
         "type": "Free",
         "plays": 0,
         "questions": [],
@@ -233,8 +182,8 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"✅ नया क्विज़ सत्र शुरू हुआ: *'{title}'*\n"
         f"🆔 ID: `{q_id}`\n"
-        f"👤 Creator: *{creator_display}*\n\n"
-        "👉 अब **@QuizBot** से जितने चाहे पोल फ़ॉरवर्ड करें।\n"
+        f"👤 Creator: *{DEFAULT_CREATOR_NAME}*\n\n"
+        "👉 अब **@QuizBot** से जितने चाहे पोल सीधे फ़ॉरवर्ड करें।\n"
         "सारे फ़ॉरवर्ड करने के बाद अंत में **/done** भेजें।"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -457,4 +406,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+        
