@@ -3,9 +3,16 @@ import os
 import random
 import string
 import io
+import urllib.request
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from xhtml2pdf import pisa
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from telegram import (
     Update,
@@ -38,9 +45,30 @@ def run_dummy_server():
 TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
 ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
-
-# यहाँ आप अपना ब्रांड नाम या क्रिएटर नाम बदल सकते हैं
 DEFAULT_CREATOR_NAME = "Dr. Dev Kumar | JB STUDY POINT"
+
+# हिंदी देवनागरी फ़ॉन्ट सेटअप
+FONT_PATH = "NotoSansDevanagari.ttf"
+FONT_NAME = "NotoSansDevanagari"
+
+def setup_hindi_font():
+    global FONT_NAME
+    if not os.path.exists(FONT_PATH):
+        try:
+            # Google Fonts से देवनागरी फ़ॉन्ट डाउनलोड
+            url = "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari-Regular.ttf"
+            urllib.request.urlretrieve(url, FONT_PATH)
+        except Exception as e:
+            print(f"Font download error: {e}")
+            FONT_NAME = "Helvetica"
+            return
+    try:
+        pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
+    except Exception as e:
+        print(f"Font register error: {e}")
+        FONT_NAME = "Helvetica"
+
+setup_hindi_font()
 
 def load_quizzes():
     if os.path.exists(DB_FILE):
@@ -65,95 +93,94 @@ active_creators = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
+# साफ़ हिंदी समर्थित PDF जनरेटर
 def generate_pdf_bytes(quiz_data):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        'H_Title',
+        fontName=FONT_NAME,
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#1a237e"),
+        alignment=1,
+        spaceAfter=12
+    )
+    meta_style = ParagraphStyle(
+        'H_Meta',
+        fontName=FONT_NAME,
+        fontSize=10,
+        leading=14,
+        textColor=colors.dimgrey,
+        alignment=1,
+        spaceAfter=18
+    )
+    q_style = ParagraphStyle(
+        'H_Q',
+        fontName=FONT_NAME,
+        fontSize=11,
+        leading=16,
+        textColor=colors.black,
+        spaceBefore=10,
+        spaceAfter=4
+    )
+    opt_style = ParagraphStyle(
+        'H_Opt',
+        fontName=FONT_NAME,
+        fontSize=10,
+        leading=15,
+        textColor=colors.HexColor("#222222"),
+        leftIndent=15,
+        spaceAfter=3
+    )
+    ans_style = ParagraphStyle(
+        'H_Ans',
+        fontName=FONT_NAME,
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor("#2e7d32"),
+        leftIndent=15,
+        spaceAfter=8
+    )
+
+    story = []
+    title = quiz_data.get('title', 'Quiz Test')
     creator = quiz_data.get('creator', DEFAULT_CREATOR_NAME)
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            @page {{
-                size: letter;
-                margin: 20mm;
-            }}
-            body {{
-                font-family: Helvetica, Arial, sans-serif;
-                color: #222;
-                font-size: 13px;
-                line-height: 1.4;
-            }}
-            .header {{
-                text-align: center;
-                border-bottom: 2px solid #1a237e;
-                padding-bottom: 8px;
-                margin-bottom: 15px;
-            }}
-            .title {{
-                font-size: 20px;
-                font-weight: bold;
-                color: #1a237e;
-                margin: 0;
-            }}
-            .meta {{
-                font-size: 11px;
-                color: #555;
-                margin-top: 5px;
-            }}
-            .question-box {{
-                margin-bottom: 14px;
-                page-break-inside: avoid;
-            }}
-            .q-title {{
-                font-weight: bold;
-                font-size: 13px;
-                color: #000;
-                margin-bottom: 4px;
-            }}
-            .option {{
-                margin-left: 15px;
-                font-size: 12px;
-                color: #333;
-                margin-bottom: 2px;
-            }}
-            .answer {{
-                margin-left: 15px;
-                font-size: 11px;
-                font-weight: bold;
-                color: #2e7d32;
-                margin-top: 3px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <div class="title">{quiz_data.get('title', 'Quiz Test')}</div>
-            <div class="meta">👤 <b>Creator:</b> {creator} | 📚 Total Questions: {len(quiz_data.get('questions', []))}</div>
-        </div>
-    """
+    questions = quiz_data.get('questions', [])
 
-    opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)"]
-    for i, q in enumerate(quiz_data.get("questions", []), 1):
-        clean_q = q['question'].replace('<', '&lt;').replace('>', '&gt;')
-        html_content += f'<div class="question-box">'
-        html_content += f'<div class="q-title">Q{i}. {clean_q}</div>'
+    story.append(Paragraph(f"<b>{title}</b>", title_style))
+    story.append(Paragraph(f"👤 Creator: {creator}  |  📚 Total Questions: {len(questions)}", meta_style))
+    story.append(Spacer(1, 8))
 
-        for o_idx, opt in enumerate(q.get("options", [])):
+    opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
+
+    for i, q in enumerate(questions, 1):
+        clean_q = q['question'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        story.append(Paragraph(f"<b>Q{i}. {clean_q}</b>", q_style))
+
+        options = q.get('options', [])
+        for o_idx, opt in enumerate(options):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            clean_opt = opt.replace('<', '&lt;').replace('>', '&gt;')
-            html_content += f'<div class="option">{lbl} {clean_opt}</div>'
+            clean_opt = opt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            story.append(Paragraph(f"{lbl} {clean_opt}", opt_style))
 
         correct_idx = q.get('correct_id', 0)
         corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
-        correct_text = q['options'][correct_idx] if correct_idx < len(q['options']) else ""
-        clean_ans = correct_text.replace('<', '&lt;').replace('>', '&gt;')
-        html_content += f'<div class="answer">Correct Answer: {corr_lbl} {clean_ans}</div>'
-        html_content += '</div>'
+        correct_text = options[correct_idx] if correct_idx < len(options) else ""
+        clean_ans = correct_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        story.append(Paragraph(f"<b>Correct Answer:</b> {corr_lbl} {clean_ans}", ans_style))
 
-    html_content += "</body></html>"
-
-    buffer = io.BytesIO()
-    pisa.CreatePDF(html_content, dest=buffer, encoding='utf-8')
+    doc.build(story)
     buffer.seek(0)
     return buffer
 
@@ -192,8 +219,6 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     title = " ".join(context.args).strip() if context.args else "इतिहास टेस्ट"
     q_id = generate_quiz_id()
-    
-    # क्रिएटर का नाम सेट करना
     creator_display = DEFAULT_CREATOR_NAME
 
     active_creators[user_id] = {
@@ -209,7 +234,7 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ नया क्विज़ सत्र शुरू हुआ: *'{title}'*\n"
         f"🆔 ID: `{q_id}`\n"
         f"👤 Creator: *{creator_display}*\n\n"
-        "👉 अब **@QuizBot** से जितने चाहे पोल सीधे फ़ॉरवर्ड करें।\n"
+        "👉 अब **@QuizBot** से जितने चाहे पोल फ़ॉरवर्ड करें।\n"
         "सारे फ़ॉरवर्ड करने के बाद अंत में **/done** भेजें।"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -249,7 +274,6 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     quiz_data = active_creators[user_id]
     q_id = quiz_data["id"]
-    
     ALL_QUIZZES[q_id] = quiz_data
     save_quizzes(ALL_QUIZZES)
     del active_creators[user_id]
@@ -326,8 +350,8 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(chat_id=chat_id, text="⏳ हिंदी पीडीएफ तैयार की जा रही है...")
     pdf_buffer = generate_pdf_bytes(ALL_QUIZZES[quiz_id])
-    safe_filename = f"{ALL_QUIZZES[quiz_id]['title'].replace(' ', '_')}.pdf"
-    
+    safe_filename = "quiz_paper.pdf"
+
     await context.bot.send_document(
         chat_id=chat_id,
         document=pdf_buffer,
@@ -433,4 +457,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-                               
+    
