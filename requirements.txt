@@ -1,2 +1,2 @@
 python-telegram-bot
-reportlab
+xhtml2pdf
