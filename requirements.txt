@@ -1,3 +1,2 @@
 python-telegram-bot
-fpdf2
-
+Pillow
