@@ -84,7 +84,7 @@ def send_quiz_email_backup(quiz_title, quiz_id, total_q, quiz_dict):
             f"• Quiz ID: {quiz_id}\n"
             f"• कुल प्रश्न: {total_q}\n"
             f"• Telegram Play: /play {quiz_id}\n\n"
-            f"JSON डेटा अटैचमेंट में सुरक्षित है।"
+            f"JSON डेटा सुरक्षित है।"
         )
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
@@ -146,7 +146,7 @@ function addQuestion() {
   <h2>JB STUDY POINT - Quiz Creator</h2>
   <form action="/save_quiz" method="POST">
     <input type="hidden" name="total_questions" id="total_q" value="1">
-    <div class="field"><label>टेस्ट का नाम:</label><input type="text" name="title" value="इतिहास टेस्ट" required></div>
+    <div class="field"><label>टेस्ट का नाम (शीर्षक):</label><input type="text" name="title" placeholder="यहाँ टेस्ट का नाम लिखें..." required></div>
     <div class="field"><label>क्रिएटर / संस्थान:</label><input type="text" name="creator" value="Dr. Dev Kumar | JB STUDY POINT" required></div>
     <div id="q-list">
       <div class="card-q">
@@ -185,8 +185,8 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
             post_data = self.rfile.read(c_len).decode('utf-8')
             parsed = parse_qs(post_data)
 
-            title = parsed.get("title", ["इतिहास टेस्ट"])[0]
-            creator = parsed.get("creator", [DEFAULT_CREATOR])[0]
+            title = parsed.get("title", ["नया टेस्ट"])[0].strip() or "नया टेस्ट"
+            creator = parsed.get("creator", [DEFAULT_CREATOR])[0].strip() or DEFAULT_CREATOR
             total = int(parsed.get("total_questions", [1])[0])
 
             questions = []
@@ -223,7 +223,7 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
                 save_all_quizzes(all_q)
                 threading.Thread(target=send_quiz_email_backup, args=(title, q_id, len(questions), q_obj)).start()
 
-                resp = f"<html><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>📧 बैकअप ईमेल पर भेजा गया।</p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
+                resp = f"<html><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट '{title}' बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>📧 बैकअप ईमेल पर भेजा गया।</p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
             else:
                 resp = "<html><body><h3>कोई सवाल नहीं मिला।</h3><a href='/'>वापस</a></body></html>"
 
@@ -237,7 +237,7 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
     server.serve_forever()
 
-# --- ULTRA HD 300 DPI PDF BOOKLET (BOLD BIG HEADER) ---
+# --- ULTRA HD 300 DPI PDF BOOKLET ---
 def generate_pdf_bytes(quiz_data):
     PAGE_W = 2480
     PAGE_H = 3508
@@ -246,7 +246,6 @@ def generate_pdf_bytes(quiz_data):
     COL_GAP = 70
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
-    # बड़े और मोटे (Bold & Big) अक्षरों के लिए फॉन्ट साइज़
     f_jb_big = ImageFont.truetype(FONT_PATH, 68)
     f_sub = ImageFont.truetype(FONT_PATH, 28)
     f_title = ImageFont.truetype(FONT_PATH, 48)
@@ -288,7 +287,6 @@ def generate_pdf_bytes(quiz_data):
         img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
         draw = ImageDraw.Draw(img)
 
-        # टॉप हेडर बार
         draw.text((MARGIN_X, 40), "JB STUDY POINT — MOCK TEST SERIES", font=f_sub, fill="#666666")
         draw.text((PAGE_W - MARGIN_X - 440, 40), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#666666")
         draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#CCCCCC", width=2)
@@ -296,10 +294,8 @@ def generate_pdf_bytes(quiz_data):
         y_offset = MARGIN_Y + 25
 
         if is_first:
-            # बड़े और मोटे (Bold & Big) अक्षरों में JB STUDY POINT
             jb_bbox = draw.textbbox((0, 0), "JB STUDY POINT", font=f_jb_big)
             jb_x = (PAGE_W - (jb_bbox[2] - jb_bbox[0])) // 2
-            # 3D/Bold इफ़ेक्ट के लिए डबल स्ट्राइक
             draw.text((jb_x, y_offset), "JB STUDY POINT", font=f_jb_big, fill="#8B0000")
             draw.text((jb_x + 1, y_offset), "JB STUDY POINT", font=f_jb_big, fill="#8B0000")
             y_offset += 78
@@ -316,7 +312,6 @@ def generate_pdf_bytes(quiz_data):
             draw.text(((PAGE_W - (t_bbox[2] - t_bbox[0])) // 2, y_offset), title.upper(), font=f_title, fill="#000000")
             y_offset += 60
 
-            # ग्रिड टेबल
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 150], outline="#333333", width=2)
             draw.line([(MARGIN_X + 440, y_offset), (MARGIN_X + 440, y_offset + 150)], fill="#333333", width=2)
             draw.line([(PAGE_W - MARGIN_X - 640, y_offset), (PAGE_W - MARGIN_X - 640, y_offset + 150)], fill="#333333", width=2)
@@ -347,7 +342,6 @@ def generate_pdf_bytes(quiz_data):
             draw.text((PAGE_W - MARGIN_X - 620, y_offset + 104), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
             y_offset += 175
 
-            # निर्देश
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 185], outline="#DDDDDD", width=2)
             draw.text((MARGIN_X + 30, y_offset + 12), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
             draw.text((MARGIN_X + 30, y_offset + 48), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
@@ -417,7 +411,6 @@ def generate_pdf_bytes(quiz_data):
 
     pages.append(cur_img)
 
-    # उत्तर तालिका पृष्ठ
     ans_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
     ans_draw = ImageDraw.Draw(ans_img)
     ans_draw.text((MARGIN_X, 40), "JB STUDY POINT — ANSWER KEY & EVALUATION", font=f_sub, fill="#666666")
@@ -504,7 +497,7 @@ def generate_omr_sheet_bytes():
     img.save(pdf_io, format="PDF", resolution=300.0)
     pdf_io.seek(0)
     return pdf_io
-    # --- FAST GAME ENGINE & BOT LOGIC ---
+    # --- BOT LOGIC & GAME ENGINE ---
 async def post_init(application):
     commands = [
         BotCommand("start", "Start the bot"),
@@ -529,7 +522,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"🇮🇳 *नमस्ते {user.first_name}!*\n\n"
         "🌐 *Quiz Creator Web:* नीचे **Open App** पर टैप करके वेब से सीधे टेस्ट बनाएँ।\n\n"
-        "• नया टेस्ट: `/create टेस्ट का नाम`\n"
+        "• नया टेस्ट: `/create` (बॉट आपसे टेस्ट का नाम पूछेगा)\n"
         "• प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
         "• टेस्ट सूची: `/myquizzes`\n"
         "• ईमेल पर बैकअप: `/backup`\n"
@@ -545,34 +538,12 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ केवल एडमिन ही नया क्विज़ बना सकते हैं।")
         return
 
-    title = " ".join(context.args).strip() if context.args else "इतिहास टेस्ट"
-    q_id = generate_quiz_id()
-
-    creator_sessions[user_id] = {
-        "step": "COLLECTING_POLLS",
-        "title": title,
-        "creator": DEFAULT_CREATOR,
-        "type": "free",
-        "promo": "None",
-        "timer": "20s",
-        "questions": [],
-        "id": q_id
-    }
-
-    msg = (
-        f"✅ नया सत्र: *'{title}'*\n🆔 ID: `{q_id}`\n\n"
-        "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करना शुरू करें।\n"
-        "सारे फ़ॉरवर्ड हो जाने के बाद **/done** भेजें।"
-    )
-    await update.message.reply_text(msg, parse_mode="Markdown")
-
-async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in creator_sessions or creator_sessions[user_id]["step"] != "COLLECTING_POLLS":
+    if context.args:
+        title = " ".join(context.args).strip()
         q_id = generate_quiz_id()
         creator_sessions[user_id] = {
             "step": "COLLECTING_POLLS",
-            "title": "इतिहास टेस्ट",
+            "title": title,
             "creator": DEFAULT_CREATOR,
             "type": "free",
             "promo": "None",
@@ -580,6 +551,23 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
             "questions": [],
             "id": q_id
         }
+        msg = (
+            f"✅ नया सत्र: *'{title}'*\n🆔 ID: `{q_id}`\n\n"
+            "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करना शुरू करें।\n"
+            "सारे प्रश्न फ़ॉरवर्ड हो जाने के बाद **/done** भेजें।"
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    else:
+        creator_sessions[user_id] = {
+            "step": "AWAITING_TITLE"
+        }
+        await update.message.reply_text("📝 कृपया इस टेस्ट का **नाम (शीर्षक)** लिखकर भेजें:")
+
+async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in creator_sessions or creator_sessions[user_id].get("step") != "COLLECTING_POLLS":
+        await update.message.reply_text("⚠️ कृपया पहले `/create` भेजकर टेस्ट का नाम तय करें!")
+        return
 
     poll = update.message.poll
     if not poll:
@@ -605,7 +593,7 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in creator_sessions or not creator_sessions[user_id]["questions"]:
+    if user_id not in creator_sessions or not creator_sessions[user_id].get("questions"):
         await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। पहले पोल भेजें।")
         return
 
@@ -621,7 +609,28 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     session = creator_sessions[user_id]
     step = session.get("step")
 
-    if step == "ASK_SECTION":
+    if step == "AWAITING_TITLE":
+        title = text
+        q_id = generate_quiz_id()
+        creator_sessions[user_id] = {
+            "step": "COLLECTING_POLLS",
+            "title": title,
+            "creator": DEFAULT_CREATOR,
+            "type": "free",
+            "promo": "None",
+            "timer": "20s",
+            "questions": [],
+            "id": q_id
+        }
+        msg = (
+            f"✅ टेस्ट का नाम तय हुआ: *'{title}'*\n🆔 ID: `{q_id}`\n\n"
+            "👉 अब **@QuizBot** से पोल फ़ॉरवर्ड करना शुरू करें।\n"
+            "सारे प्रश्न फ़ॉरवर्ड हो जाने के बाद **/done** भेजें।"
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
+        return
+
+    elif step == "ASK_SECTION":
         session["step"] = "ASK_PROMO"
         await update.message.reply_text("📣 Send your promo message (shown periodically). Send 'skip' or 'no' to leave empty.")
         return
@@ -838,9 +847,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             neg_val = setup_data["negative"]
             s_exp = setup_data["show_exp"]
 
+            is_private = (query.message.chat.type == "private")
+
             del pending_setups[chat_id]
             await query.edit_message_text(f"✅ सेटअप पूरा हुआ! (समय: {t_sec}s | निगेटिव: -{neg_val} | व्याख्या: {'हाँ' if s_exp else 'नहीं'})")
-            await start_group_quiz(chat_id, q_id, t_sec, neg_val, s_exp, context)
+            await start_group_quiz(chat_id, q_id, t_sec, neg_val, s_exp, is_private, context)
 
     elif data.startswith("pdf_"):
         quiz_id = data.replace("pdf_", "")
@@ -867,8 +878,8 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await context.bot.send_message(chat_id=chat_id, text=f"❌ PDF त्रुटि: {str(e)}")
 
-# --- AUTO GROUP RUNNER ---
-async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, context: ContextTypes.DEFAULT_TYPE):
+# --- AUTO QUIZ RUNNER ---
+async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, is_private, context: ContextTypes.DEFAULT_TYPE):
     all_q = get_all_quizzes()
     quiz = all_q[quiz_id]
     total = len(quiz["questions"])
@@ -879,10 +890,10 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, conte
         "timer": int(timer_sec),
         "negative": neg_val,
         "show_exp": show_exp,
+        "is_private": is_private,
         "users": {},
         "current_msg_id": None,
         "total_q": total,
-        "answered_users": set(),
         "timer_task": None
     }
 
@@ -899,6 +910,7 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, conte
     await asyncio.sleep(2)
     await send_next_question(chat_id, context)
 
+# टाइमर केवल तब सवाल बदलेगा जब समय पूरा खत्म हो जाए
 async def auto_timer_countdown(chat_id, msg_id, duration, context: ContextTypes.DEFAULT_TYPE):
     try:
         await asyncio.sleep(duration)
@@ -924,8 +936,6 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
     idx = sess["index"]
     timer_sec = int(sess["timer"])
     show_exp = sess["show_exp"]
-
-    sess["answered_users"] = set()
 
     if idx < len(quiz["questions"]):
         q = quiz["questions"][idx]
@@ -966,7 +976,7 @@ async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
     else:
         await finish_quiz_and_show_ranks(chat_id, context)
 
-# --- आंसर आते ही तुरंत अगला सवाल भेजने का लॉजिक ---
+# --- आंसर हैंडलर: ग्रुप और पर्सनल का पूरी तरह अलग व्यवहार ---
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     p_ans = update.poll_answer
     poll_id = p_ans.poll_id
@@ -988,8 +998,6 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     "wrong_questions": []
                 }
 
-            sess["answered_users"].add(uid)
-
             if p_ans.option_ids:
                 user_choice = p_ans.option_ids[0]
                 if user_choice == correct_id:
@@ -1006,10 +1014,12 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         "correct_opt": q_data["options"][correct_id]
                     })
 
-            # जैसे ही प्रतिभागी उत्तर दे, तुरंत 1.5 सेकंड में अगला सवाल भेजें
-            if sess.get("timer_task") and not sess["timer_task"].done():
-                sess["timer_task"].cancel()
-                asyncio.create_task(trigger_fast_next(chat_id, sess.get("current_msg_id"), context))
+            # ग्रुप में कोई व्यवधान नहीं: टाइमर पूरा समय चलेगा ताकि हर छात्र अपना उत्तर चुन सके
+            # पर्सनल चैट (DM) में: तुरंत 1.5s में अगला प्रश्न भेजा जाएगा
+            if sess.get("is_private") is True:
+                if sess.get("timer_task") and not sess["timer_task"].done():
+                    sess["timer_task"].cancel()
+                    asyncio.create_task(trigger_fast_next(chat_id, sess.get("current_msg_id"), context))
 
 async def trigger_fast_next(chat_id, msg_id, context: ContextTypes.DEFAULT_TYPE):
     await asyncio.sleep(1.5)
