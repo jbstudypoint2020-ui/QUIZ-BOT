@@ -1,4 +1,3 @@
-    
 import json
 import os
 import random
@@ -44,18 +43,16 @@ DEFAULT_CREATOR_NAME = "Dr. Dev Kumar | JB STUDY POINT"
 
 FONT_PATH = "FreeSerif.ttf"
 
-def download_hindi_font():
+def ensure_font_downloaded():
     if not os.path.exists(FONT_PATH):
         try:
-            # GNU FreeSerif फ़ॉन्ट - संपूर्ण हिंदी/देवनागरी यूनिकोड सपोर्ट
             url = "https://raw.githubusercontent.com/sensboston/sensboston.github.io/master/FreeSerif.ttf"
             urllib.request.urlretrieve(url, FONT_PATH)
         except Exception as e:
             print(f"Font download error: {e}")
 
-download_hindi_font()
-
-def load_quizzes():
+# हमेशा ताज़ा डेटाबेस फ़ाइल से पढ़ेगा
+def get_all_quizzes():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
@@ -64,22 +61,21 @@ def load_quizzes():
             return {}
     return {}
 
-def save_quizzes(data):
+def save_all_quizzes(data):
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Error saving DB: {e}")
 
-ALL_QUIZZES = load_quizzes()
 user_states = {}
 active_creators = {}
 
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# fpdf2 आधारित साफ़ हिंदी PDF जनरेटर
 def generate_pdf_bytes(quiz_data):
+    ensure_font_downloaded()
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -90,28 +86,26 @@ def generate_pdf_bytes(quiz_data):
     else:
         font_name = "Helvetica"
 
-    # Header / Title
     title = quiz_data.get('title', 'Quiz Test')
     creator = quiz_data.get('creator', DEFAULT_CREATOR_NAME)
     questions = quiz_data.get('questions', [])
 
     pdf.set_font(font_name, size=16)
     pdf.set_text_color(26, 35, 126)
-    pdf.cell(0, 10, text=title, align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, text=str(title), align="C", new_x="LMARGIN", new_y="NEXT")
 
     pdf.set_font(font_name, size=10)
     pdf.set_text_color(100, 100, 100)
     pdf.cell(0, 6, text=f"Creator: {creator}  |  Total Questions: {len(questions)}", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
 
-    # Questions & Options
     opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
 
     for i, q in enumerate(questions, 1):
         pdf.set_font(font_name, size=11)
         pdf.set_text_color(0, 0, 0)
-        q_line = f"Q{i}. {q['question']}"
-        pdf.multi_cell(0, 6, text=q_line, new_x="LMARGIN", new_y="NEXT")
+        q_text = f"Q{i}. {q.get('question', '')}"
+        pdf.multi_cell(0, 6, text=q_text, new_x="LMARGIN", new_y="NEXT")
 
         options = q.get('options', [])
         pdf.set_font(font_name, size=10)
@@ -215,16 +209,17 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     })
 
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global ALL_QUIZZES
     user_id = update.effective_user.id
     if user_id not in active_creators or not active_creators[user_id]["questions"]:
-        await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। पहले पोल फ़ॉरवर्ड करें।", parse_mode="Markdown")
+        await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। कृपया पहले पोल फ़ॉरवर्ड करें।", parse_mode="Markdown")
         return
 
     quiz_data = active_creators[user_id]
     q_id = quiz_data["id"]
-    ALL_QUIZZES[q_id] = quiz_data
-    save_quizzes(ALL_QUIZZES)
+
+    all_q = get_all_quizzes()
+    all_q[q_id] = quiz_data
+    save_all_quizzes(all_q)
     del active_creators[user_id]
 
     total_q = len(quiz_data["questions"])
@@ -256,20 +251,16 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(card_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global ALL_QUIZZES
     if update.effective_user.id != ADMIN_ID:
         return
 
-    disk_data = load_quizzes()
-    if disk_data:
-        ALL_QUIZZES.update(disk_data)
-
-    if not ALL_QUIZZES:
+    all_q = get_all_quizzes()
+    if not all_q:
         await update.message.reply_text("कोई क्विज़ मौजूद नहीं है।", parse_mode="Markdown")
         return
 
-    lines = [f"🧩 *Your Quizzes (Page 1)*\nTotal: {len(ALL_QUIZZES)}\n"]
-    for idx, (q_id, q_data) in enumerate(ALL_QUIZZES.items(), 1):
+    lines = [f"🧩 *Your Quizzes (Page 1)*\nTotal: {len(all_q)}\n"]
+    for idx, (q_id, q_data) in enumerate(all_q.items(), 1):
         lines.append(
             f"*{idx}. {q_data.get('title', 'Quiz')}*\n"
             f"🆔 ID: `{q_id}`\n"
@@ -289,25 +280,25 @@ async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
 
 async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
-    global ALL_QUIZZES
-    if quiz_id not in ALL_QUIZZES:
-        ALL_QUIZZES.update(load_quizzes())
-
-    if quiz_id not in ALL_QUIZZES or not ALL_QUIZZES[quiz_id].get("questions"):
+    all_q = get_all_quizzes()
+    if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।", parse_mode="Markdown")
         return
 
     await context.bot.send_message(chat_id=chat_id, text="⏳ हिंदी पीडीएफ तैयार की जा रही है...")
-    pdf_buffer = generate_pdf_bytes(ALL_QUIZZES[quiz_id])
-    safe_filename = "quiz_paper.pdf"
+    try:
+        pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
+        safe_filename = f"{all_q[quiz_id].get('title', 'Quiz')}.pdf".replace(" ", "_")
 
-    await context.bot.send_document(
-        chat_id=chat_id,
-        document=pdf_buffer,
-        filename=safe_filename,
-        caption=f"📄 *{ALL_QUIZZES[quiz_id]['title']}*\n👤 Creator: {ALL_QUIZZES[quiz_id].get('creator', DEFAULT_CREATOR_NAME)}\n🆔 ID: `{quiz_id}`",
-        parse_mode="Markdown"
-    )
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=pdf_buffer,
+            filename=safe_filename,
+            caption=f"📄 *{all_q[quiz_id]['title']}*\n👤 Creator: {all_q[quiz_id].get('creator', DEFAULT_CREATOR_NAME)}\n🆔 ID: `{quiz_id}`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ PDF बनाने में त्रुटि: {str(e)}")
 
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -329,16 +320,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_quiz_pdf(query.message.chat_id, quiz_id, context)
 
 async def start_quiz_session(chat_id, user_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
-    global ALL_QUIZZES
-    if quiz_id not in ALL_QUIZZES:
-        ALL_QUIZZES.update(load_quizzes())
-
-    if quiz_id not in ALL_QUIZZES or not ALL_QUIZZES[quiz_id].get("questions"):
+    all_q = get_all_quizzes()
+    if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं हैं।", parse_mode="Markdown")
         return
 
-    ALL_QUIZZES[quiz_id]["plays"] = ALL_QUIZZES[quiz_id].get("plays", 0) + 1
-    save_quizzes(ALL_QUIZZES)
+    all_q[quiz_id]["plays"] = all_q[quiz_id].get("plays", 0) + 1
+    save_all_quizzes(all_q)
 
     user_states[user_id] = {
         "quiz_id": quiz_id,
@@ -350,7 +338,8 @@ async def start_quiz_session(chat_id, user_id, quiz_id, context: ContextTypes.DE
 
 async def send_quiz_poll(user_id, context: ContextTypes.DEFAULT_TYPE):
     state = user_states[user_id]
-    quiz = ALL_QUIZZES[state["quiz_id"]]
+    all_q = get_all_quizzes()
+    quiz = all_q[state["quiz_id"]]
     idx = state["index"]
 
     if idx < len(quiz["questions"]):
@@ -406,4 +395,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
+    
