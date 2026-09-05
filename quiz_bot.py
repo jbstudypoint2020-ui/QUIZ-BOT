@@ -4,6 +4,7 @@ import random
 import re
 import string
 import io
+import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from PIL import Image, ImageDraw, ImageFont
@@ -60,8 +61,9 @@ def save_all_quizzes(data):
     except Exception as e:
         print(f"Error saving DB: {e}")
 
-user_states = {}
 creator_sessions = {}
+active_group_quizzes = {}
+pending_setups = {}
 
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -71,7 +73,7 @@ def clean_question_text(raw_text):
     text = re.sub(r"^\s*(Q|q)?\d+[\.\)\-:]\s*", "", text)
     return text.strip()
 
-# 2-Column Professional Exam Booklet Generator
+# 2-Column Professional Exam Booklet PDF
 def generate_pdf_bytes(quiz_data):
     PAGE_W = 1240
     PAGE_H = 1754
@@ -80,7 +82,6 @@ def generate_pdf_bytes(quiz_data):
     COL_GAP = 30
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
-    # Fonts
     f_brand = ImageFont.truetype(FONT_PATH, 24)
     f_sub = ImageFont.truetype(FONT_PATH, 13)
     f_title = ImageFont.truetype(FONT_PATH, 22)
@@ -122,7 +123,6 @@ def generate_pdf_bytes(quiz_data):
         img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
         draw = ImageDraw.Draw(img)
 
-        # Running Header
         draw.text((MARGIN_X, 22), f"{creator.upper()} — MOCK TEST SERIES", font=f_sub, fill="#777777")
         draw.text((PAGE_W - MARGIN_X - 220, 22), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#777777")
         draw.line([(MARGIN_X, 36), (PAGE_W - MARGIN_X, 36)], fill="#DDDDDD", width=1)
@@ -130,7 +130,6 @@ def generate_pdf_bytes(quiz_data):
         y_offset = MARGIN_Y + 10
 
         if is_first:
-            # Logo / Brand Area
             draw.ellipse([MARGIN_X, y_offset, MARGIN_X + 48, y_offset + 48], outline="#8B0000", width=2)
             draw.text((MARGIN_X + 11, y_offset + 12), "JB", font=f_brand, fill="#8B0000")
             draw.text((MARGIN_X + 58, y_offset + 5), creator, font=f_brand, fill="#111111")
@@ -138,33 +137,28 @@ def generate_pdf_bytes(quiz_data):
             draw.line([(MARGIN_X, y_offset + 54), (PAGE_W - MARGIN_X, y_offset + 54)], fill="#8B0000", width=2)
             y_offset += 65
 
-            # Mock Test Box Header
             t_bbox = draw.textbbox((0, 0), title.upper(), font=f_title)
             draw.text(((PAGE_W - (t_bbox[2] - t_bbox[0])) // 2, y_offset), title.upper(), font=f_title, fill="#000000")
             y_offset += 30
 
-            sub_b = draw.textbbox((0, 0), "Paper - II : History / History Practice Paper", font=f_sub)
-            draw.text(((PAGE_W - (sub_b[2] - sub_b[0])) // 2, y_offset), "Paper - II : History / History Practice Paper", font=f_sub, fill="#555555")
+            sub_b = draw.textbbox((0, 0), "Paper - II : History / Practice Paper", font=f_sub)
+            draw.text(((PAGE_W - (sub_b[2] - sub_b[0])) // 2, y_offset), "Paper - II : History / Practice Paper", font=f_sub, fill="#555555")
             y_offset += 25
 
-            # Table Box
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 75], outline="#333333", width=1)
             draw.line([(MARGIN_X + 220, y_offset), (MARGIN_X + 220, y_offset + 75)], fill="#333333", width=1)
             draw.line([(PAGE_W - MARGIN_X - 320, y_offset), (PAGE_W - MARGIN_X - 320, y_offset + 75)], fill="#333333", width=1)
             draw.line([(MARGIN_X, y_offset + 45), (PAGE_W - MARGIN_X, y_offset + 45)], fill="#333333", width=1)
 
-            # Table Cell 1
             draw.text((MARGIN_X + 10, y_offset + 6), "TEST NO.", font=f_tbl_head, fill="#444444")
             draw.text((MARGIN_X + 10, y_offset + 22), "01", font=f_tbl_val, fill="#000000")
 
-            # Table Cell 2 (Roll No Box)
             draw.text((MARGIN_X + 230, y_offset + 6), "ROLL NO.", font=f_tbl_head, fill="#444444")
             rx = MARGIN_X + 230
             for _ in range(8):
                 draw.rectangle([rx, y_offset + 20, rx + 16, y_offset + 38], outline="#666666", width=1)
                 rx += 20
 
-            # Table Cell 3 (Booklet Series)
             draw.text((PAGE_W - MARGIN_X - 310, y_offset + 6), "BOOKLET SERIES", font=f_tbl_head, fill="#444444")
             bx = PAGE_W - MARGIN_X - 310
             for char, active in [("A", True), ("B", False), ("C", False), ("D", False)]:
@@ -176,22 +170,19 @@ def generate_pdf_bytes(quiz_data):
                     draw.text((bx + 4, y_offset + 23), char, font=f_tbl_val, fill="#000000")
                 bx += 24
 
-            # Table Bottom Row
             draw.text((MARGIN_X + 10, y_offset + 52), "Time: 2 Hours", font=f_tbl_val, fill="#111111")
             draw.text((MARGIN_X + 230, y_offset + 52), f"Total Questions: {total_q}", font=f_tbl_val, fill="#111111")
             draw.text((PAGE_W - MARGIN_X - 310, y_offset + 52), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
             y_offset += 85
 
-            # Instructions Box
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 95], outline="#CCCCCC", width=1)
             draw.text((MARGIN_X + 20, y_offset + 8), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
             draw.text((MARGIN_X + 20, y_offset + 26), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
             draw.text((MARGIN_X + 20, y_offset + 42), "2. ओएमआर उत्तर पत्रक पर केवल नीले/काले बॉल-पॉइंट पेन से गोलों को पूर्ण रूप से गहरा करें।", font=f_inst, fill="#333333")
             draw.text((MARGIN_X + 20, y_offset + 58), "3. परीक्षा कक्ष में मोबाइल फोन या किसी भी इलेक्ट्रॉनिक उपकरण का प्रयोग वर्जित है।", font=f_inst, fill="#333333")
-            draw.text((MARGIN_X + 20, y_offset + 74), "4. उत्तर कुंजी एवं स्व-मूल्यांकन तालिका अंतिम पृष्ठ पर प्रदान की गई है।", font=f_inst, fill="#333333")
+            draw.text((MARGIN_X + 20, y_offset + 74), "4. उत्तर तालिका अंतिम पृष्ठ पर प्रदान की गई है।", font=f_inst, fill="#333333")
             y_offset += 105
 
-            # Ribbon Banner
             draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 26], fill="#8B0000")
             r_box = draw.textbbox((0, 0), "GENERAL PAPER & SUBJECT SECTION", font=f_bar)
             draw.text(((PAGE_W - (r_box[2] - r_box[0])) // 2, y_offset + 6), "GENERAL PAPER & SUBJECT SECTION", font=f_bar, fill="#FFFFFF")
@@ -227,7 +218,6 @@ def generate_pdf_bytes(quiz_data):
         tot_opt_lines = sum(len(x) for x in opt_items)
         block_h = (len(q_lines) * 22) + (tot_opt_lines * 19) + 14
 
-        # Page / Column Overflow check
         if cur_y + block_h > (PAGE_H - MARGIN_Y):
             if cur_col == 0:
                 cur_col = 1
@@ -241,12 +231,10 @@ def generate_pdf_bytes(quiz_data):
 
         col_x = MARGIN_X if cur_col == 0 else MARGIN_X + COL_W + COL_GAP
 
-        # Render Question Text (Bold/Black)
         for line in q_lines:
             cur_draw.text((col_x, cur_y), line, font=f_q, fill="#000000")
             cur_y += 22
 
-        # Render Options
         for item in opt_items:
             for line in item:
                 cur_draw.text((col_x + 12, cur_y), line, font=f_opt, fill="#222222")
@@ -256,11 +244,10 @@ def generate_pdf_bytes(quiz_data):
 
     pages.append(cur_img)
 
-    # ----------------- Last Page: Professional Answer Key -----------------
+    # Last Page Answer Key
     ans_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
     ans_draw = ImageDraw.Draw(ans_img)
 
-    # Header
     ans_draw.text((MARGIN_X, 22), f"{creator.upper()} — ANSWER KEY & EVALUATION", font=f_sub, fill="#777777")
     ans_draw.line([(MARGIN_X, 36), (PAGE_W - MARGIN_X, 36)], fill="#8B0000", width=2)
 
@@ -276,7 +263,6 @@ def generate_pdf_bytes(quiz_data):
     ans_draw.line([(MARGIN_X + 100, ay), (PAGE_W - MARGIN_X - 100, ay)], fill="#8B0000", width=1)
     ay += 35
 
-    # 5-Column Grid Matrix
     cols = 5
     usable_w = PAGE_W - (2 * MARGIN_X) - 40
     cw = usable_w // cols
@@ -311,19 +297,20 @@ async def post_init(application):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    chat_id = update.effective_chat.id
     args = context.args
 
     if args and args[0].startswith("PLAY_"):
         quiz_id = args[0].replace("PLAY_", "")
-        await start_quiz_session(update.effective_chat.id, user.id, quiz_id, context)
+        await prompt_quiz_settings(chat_id, quiz_id, user.id, context)
         return
 
     text = (
         f"🇮🇳 *नमस्ते {user.first_name}!*\n\n"
-        "• नया क्विज़: `/create क्विज़ का नाम`\n"
+        "• नया टेस्ट बनाने के लिए: `/create टेस्ट का नाम`\n"
         "• प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
-        "• सभी क्विज़ देखें: `/myquizzes`\n"
-        "• परीक्षा बुकलेट PDF डाउनलोड करें: `/pdf QUIZ_ID`"
+        "• टेस्ट सूची देखने के लिए: `/myquizzes`\n"
+        "• टेस्ट शुरू करने के लिए: `/play QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -376,19 +363,19 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
 
     options = [opt.text for opt in poll.options]
     correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
+    explanation = poll.explanation if hasattr(poll, "explanation") and poll.explanation else ""
 
     session = creator_sessions[user_id]
     session["questions"].append({
         "question": poll.question,
         "options": options,
-        "correct_id": correct_id
+        "correct_id": correct_id,
+        "explanation": explanation
     })
 
     count = len(session["questions"])
-    status_text = f"✅ {count} question(s) saved from polls! ➡️\nSend more or /done"
-
     if count == 1 or count % 5 == 0:
-        await update.message.reply_text(status_text)
+        await update.message.reply_text(f"✅ {count} question(s) saved from polls! ➡️\nSend more or /done")
 
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -415,21 +402,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     elif step == "ASK_PROMO":
-        if text.lower() in ["no", "skip", "none"]:
-            session["promo"] = "None"
-        else:
-            session["promo"] = text
-
+        session["promo"] = "None" if text.lower() in ["no", "skip", "none"] else text
         session["step"] = "ASK_TYPE"
         await update.message.reply_text("🏷 Type (free/paid)")
         return
 
     elif step == "ASK_TYPE":
-        if "paid" in text.lower():
-            session["type"] = "paid"
-        else:
-            session["type"] = "free"
-
+        session["type"] = "paid" if "paid" in text.lower() else "free"
         q_id = session["id"]
         all_q = get_all_quizzes()
         all_q[q_id] = session
@@ -442,7 +421,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🎉 *Quiz Created!*\n\n"
             f"🏷 *Name:* {session['title']}\n"
             f"❓ *Questions:* {total_q}\n"
-            f"⏱ *Timer:* {session['timer']}\n"
             f"🆔 *ID:* `{q_id}`\n"
             f"🏷 *Type:* {session['type']}\n"
             f"📣 *Promo:* {session['promo']}\n"
@@ -454,58 +432,77 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         add_group_url = f"https://t.me/{bot_info.username}?startgroup=PLAY_{q_id}"
 
         keyboard = [
-            [InlineKeyboardButton("▶️ Start", callback_data=f"play_{q_id}")],
+            [InlineKeyboardButton("▶️ Start Quiz", callback_data=f"init_{q_id}")],
             [InlineKeyboardButton("📄 Download Booklet PDF", callback_data=f"pdf_{q_id}")],
             [InlineKeyboardButton("➕ Add to Group", url=add_group_url)],
-            [InlineKeyboardButton("📩 Share", url=share_url)],
-            [
-                InlineKeyboardButton("🎮 Play (Practice)", callback_data=f"play_{q_id}"),
-                InlineKeyboardButton("🎯 Play (Exam)", callback_data=f"play_{q_id}")
-            ]
+            [InlineKeyboardButton("📩 Share", url=share_url)]
         ]
 
         await update.message.reply_text(card_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    all_q = get_all_quizzes()
-    if not all_q:
-        await update.message.reply_text("कोई क्विज़ मौजूद नहीं है।")
-        return
-
-    lines = [f"🧩 *Your Quizzes*\nTotal: {len(all_q)}\n"]
-    for idx, (q_id, q_data) in enumerate(all_q.items(), 1):
-        lines.append(
-            f"*{idx}. {q_data.get('title', 'Quiz')}*\n"
-            f"🆔 ID: `{q_id}`\n"
-            f"❓ Questions: {len(q_data.get('questions', []))}\n"
-            f"🎯 Play: `/play {q_id}`\n"
-            f"📄 PDF: `/pdf {q_id}`\n"
-            "--------------------------------"
-        )
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/pdf GGN80C50L`")
+        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/play GGN80C50L`")
         return
     quiz_id = context.args[0].strip().upper()
-    await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
+    await prompt_quiz_settings(update.effective_chat.id, quiz_id, update.effective_user.id, context)
 
-async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
+# ----------------- टाइमर और एक्सप्लेनेशन परमिशन प्रॉम्ट्स -----------------
+
+async def prompt_quiz_settings(chat_id, quiz_id, host_user_id, context: ContextTypes.DEFAULT_TYPE):
     all_q = get_all_quizzes()
     if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` उपलब्ध नहीं है।")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ परीक्षा बुकलेट PDF तैयार की जा रही है...")
-    try:
-        pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
-        safe_filename = f"{all_q[quiz_id].get('title', 'Exam_Paper')}_Booklet.pdf".replace(" ", "_")
+    pending_setups[chat_id] = {
+        "quiz_id": quiz_id,
+        "host_id": host_user_id,
+        "timer": 20,
+        "show_exp": False
+    }
 
-        await context.bot.send_document(
-            chat_id=chat_id,
-            document=pdf_buffer,
-            filename=sa
+    keyboard = [
+        [
+            InlineKeyboardButton("⏱ 15s", callback_data=f"set_time_{chat_id}_15"),
+            InlineKeyboardButton("⏱ 20s", callback_data=f"set_time_{chat_id}_20"),
+        ],
+        [
+            InlineKeyboardButton("⏱ 25s", callback_data=f"set_time_{chat_id}_25"),
+            InlineKeyboardButton("⏱ 30s", callback_data=f"set_time_{chat_id}_30"),
+        ]
+    ]
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"⚙️ *टेस्ट सेटअप:* `{all_q[quiz_id]['title']}`\n\nकृपया प्रत्येक प्रश्न के लिए **समय सीमा (Timer)** चुनें:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = query.from_user.id
+
+    if data.startswith("init_"):
+        quiz_id = data.replace("init_", "")
+        await prompt_quiz_settings(query.message.chat_id, quiz_id, user_id, context)
+
+    elif data.startswith("set_time_"):
+        parts = data.split("_")
+        chat_id = int(parts[2])
+        timer_val = int(parts[3])
+
+        if chat_id in pending_setups:
+            if user_id != pending_setups[chat_id]["host_id"] and user_id != ADMIN_ID:
+                await query.answer("❌ केवल टेस्ट शुरू करने वाले एडमिन ही यह चुन सकते हैं।", show_alert=True)
+                return
+
+            pending_setups[chat_id]["timer"] = timer_val
+
+            exp_keyboard = [
+                [
+                    InlineKeyboardButton("✅ हाँ (Show)", callback_data=f"set_exp_{chat_id}_yes"),
+                    InlineK
