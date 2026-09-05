@@ -20,12 +20,9 @@ from telegram.ext import (
 )
 
 TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
-BOT_USERNAME = "JBSTUDYPOINT_BOT"  # अपने बॉट का यूज़रनेम (बिना @ के)
 ADMIN_ID = 1141231956
-
 DB_FILE = "quizzes.json"
 
-# क्विज़ डेटाबेस लोड/सेव करना
 def load_quizzes():
     if os.path.exists(DB_FILE):
         try:
@@ -41,14 +38,12 @@ def save_quizzes(data):
 
 QUIZZES = load_quizzes()
 
-# स्टेट्स
 WAIT_TITLE, WAIT_QUESTION = range(2)
 user_states = {}
 
 def generate_quiz_id():
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-# मेन्यू सेटअप
 async def post_init(application):
     commands = [
         BotCommand("start", "Start the bot / check if alive"),
@@ -57,12 +52,10 @@ async def post_init(application):
     ]
     await application.bot.set_my_commands(commands)
 
-# /start कमांड
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
 
-    # यदि किसी लिंक से स्टार्ट हुआ हो (जैसे deep linking: /start PLAY_ID)
     if args and args[0].startswith("PLAY_"):
         quiz_id = args[0].replace("PLAY_", "")
         await start_quiz_session(update.effective_chat.id, user.id, quiz_id, context)
@@ -76,19 +69,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
-# /features कमांड
 async def features(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "✨ *बॉट के मुख्य फीचर्स:*\n\n"
-        "1. 🎯 *बिना शेयर बटन और बिना उत्तर व्याख्या के निष्पक्ष परीक्षा*\n"
-        "2. ➕ *ग्रुप में जोड़कर लाइव क्विज़ कराने की सुविधा*\n"
-        "3. 🎮 *प्रैक्टिस और एग्जाम मोड*\n"
-        "4. 📊 *तुरंत स्कोरकार्ड और परिणाम*\n"
-        "5. 📝 *खुद का टेस्ट कभी भी बनाने की सुविधा*"
+        "1. 🎯 *बिना शेयर बटन और बिना उत्तर व्याख्या के परीक्षा*\n"
+        "2. ➕ *सीधे @QuizBot से पोल फ़ॉरवर्ड करके प्रश्न जोड़ें*\n"
+        "3. 📊 *तुरंत स्कोरकार्ड और परिणाम*\n"
+        "4. 📝 *खुद का टेस्ट कभी भी बनाने की सुविधा*"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
-# /create कमांड - नया क्विज़ बनाना शुरू करना
 async def create_quiz_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ केवल एडमिन ही नया क्विज़ बना सकते हैं।")
@@ -112,44 +102,63 @@ async def get_quiz_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_msg = (
         f"✅ क्विज़ *'{title}'* बन गया है!\n"
         f"🆔 ID: `{quiz_id}`\n\n"
-        "अब इस प्रारूप में प्रश्न भेजें (एक-एक करके):\n"
-        "`प्रश्न | विकल्प 1 | विकल्प 2 | विकल्प 3 | विकल्प 4 | सही नंबर (1-4)`\n\n"
-        "जब सारे प्रश्न जुड़ जाएं, तो */done* लिखकर भेजें।"
+        "👉 अब **@QuizBot** से सीधे पोल/क्विज़ फ़ॉरवर्ड करें (एक साथ 10-20 भी फ़ॉरवर्ड कर सकते हैं)।\n\n"
+        "सारे प्रश्न फ़ॉरवर्ड करने के बाद **/done** भेजें।"
     )
     await update.message.reply_text(help_msg, parse_mode="Markdown")
     return WAIT_QUESTION
 
-async def get_quiz_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+# फ़ॉरवर्ड किए गए पोल को पकड़ना
+async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_id = context.user_data.get("current_quiz_id")
-
-    if "|" not in text:
-        await update.message.reply_text("❌ प्रारूप गलत है! कृपया `प्रश्न | विक 1 | विक 2 | विक 3 | विक 4 | सही (1-4)` में भेजें।")
+    if not quiz_id or quiz_id not in QUIZZES:
         return WAIT_QUESTION
 
-    parts = [p.strip() for p in text.split("|")]
-    if len(parts) != 6:
-        await update.message.reply_text("❌ ठीक 6 भाग होने चाहिए (प्रश्न + 4 विकल्प + सही उत्तर)।")
+    poll = update.message.poll
+    if not poll:
         return WAIT_QUESTION
 
-    try:
-        correct_num = int(parts[5])
-        if correct_num < 1 or correct_num > 4:
-            raise ValueError()
-    except ValueError:
-        await update.message.reply_text("❌ सही उत्तर 1 से 4 के बीच होना चाहिए।")
-        return WAIT_QUESTION
+    options = [opt.text for opt in poll.options]
+    correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
 
     q_data = {
-        "question": parts[0],
-        "options": parts[1:5],
-        "correct_id": correct_num - 1
+        "question": poll.question,
+        "options": options,
+        "correct_id": correct_id
     }
     QUIZZES[quiz_id]["questions"].append(q_data)
     save_quizzes(QUIZZES)
 
     total_q = len(QUIZZES[quiz_id]["questions"])
-    await update.message.reply_text(f"✅ प्रश्न #{total_q} जुड़ गया! अगला प्रश्न भेजें या समाप्त करने के लिए */done* भेजें।", parse_mode="Markdown")
+    await update.message.reply_text(f"✅ {total_q} question(s) saved from polls! ➡️ Send more or /done")
+    return WAIT_QUESTION
+
+# टेक्स्ट फॉर्मेट से प्रश्न जोड़ना
+async def handle_incoming_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    quiz_id = context.user_data.get("current_quiz_id")
+    if not quiz_id or quiz_id not in QUIZZES:
+        return WAIT_QUESTION
+
+    if "|" in text:
+        parts = [p.strip() for p in text.split("|")]
+        if len(parts) == 6:
+            try:
+                c_num = int(parts[5])
+                q_data = {
+                    "question": parts[0],
+                    "options": parts[1:5],
+                    "correct_id": c_num - 1
+                }
+                QUIZZES[quiz_id]["questions"].append(q_data)
+                save_quizzes(QUIZZES)
+                total_q = len(QUIZZES[quiz_id]["questions"])
+                await update.message.reply_text(f"✅ प्रश्न #{total_q} जुड़ गया! और भेजें या /done भेजें।")
+                return WAIT_QUESTION
+            except Exception:
+                pass
+
+    await update.message.reply_text("ℹ️ कृपया @QuizBot से पोल फ़ॉरवर्ड करें या समाप्त करने के लिए /done भेजें।")
     return WAIT_QUESTION
 
 async def create_quiz_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161,7 +170,6 @@ async def create_quiz_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz = QUIZZES[quiz_id]
     total_q = len(quiz["questions"])
 
-    # जैसा आपके स्क्रीनशॉट में कार्ड है, बिल्कुल वैसा लेआउट:
     card_text = (
         f"🇮🇳 *Advance Quiz Bot*\n"
         f"🆔 **ID:** `{quiz_id}`\n"
@@ -189,7 +197,6 @@ async def create_quiz_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(card_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return ConversationHandler.END
 
-# क्विज़ खेलना शुरू करना
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -230,7 +237,6 @@ async def send_quiz_poll(user_id, context: ContextTypes.DEFAULT_TYPE):
         )
         context.bot_data[msg.poll.id] = (user_id, q["correct_id"])
     else:
-        # टेस्ट समाप्त
         score = state["score"]
         total = len(quiz["questions"])
         await context.bot.send_message(
@@ -262,7 +268,8 @@ def main():
             WAIT_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_quiz_title)],
             WAIT_QUESTION: [
                 CommandHandler("done", create_quiz_done),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_quiz_question)
+                MessageHandler(filters.POLL, handle_incoming_poll),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_incoming_text)
             ]
         },
         fallbacks=[CommandHandler("done", create_quiz_done)]
