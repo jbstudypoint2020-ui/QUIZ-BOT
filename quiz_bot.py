@@ -3,6 +3,8 @@ import os
 import random
 import string
 import io
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -24,6 +26,18 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler
 )
+
+# Render को लाइव रखने के लिए डमी वेब सर्वर
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Quiz Bot is Running Live!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
+    server.serve_forever()
 
 TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
 ADMIN_ID = 1141231956
@@ -49,7 +63,6 @@ user_states = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# PDF जनरेट करने का फंक्शन
 def generate_pdf_bytes(quiz_data):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -102,12 +115,10 @@ def generate_pdf_bytes(quiz_data):
     )
 
     story = []
-    # हेडर
     story.append(Paragraph(f"<b>{quiz_data['title']}</b>", title_style))
     story.append(Paragraph(f"Created by: {quiz_data['creator']} | Total Questions: {len(quiz_data['questions'])}", meta_style))
     story.append(Spacer(1, 10))
 
-    # प्रश्न और विकल्प
     for i, q in enumerate(quiz_data['questions'], 1):
         q_text = f"<b>Q{i}. {q['question']}</b>"
         story.append(Paragraph(q_text, q_style))
@@ -149,7 +160,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• नया क्विज़ बनाने के लिए: /create\n"
         "• सभी क्विज़ देखने के लिए: /myquizzes\n"
         "• किसी क्विज़ आईडी से खेलने के लिए: `/play QUIZ_ID`\n"
-        "• पीडीएफ निकालने के लिए: `/pdf QUIZ_ID`"
+        "• पीडीएफ डाउनलोड करने के लिए: `/pdf QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -398,6 +409,9 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await send_quiz_poll(user_id, context)
 
 def main():
+    # बैकग्राउंड वेब सर्वर चालू करें
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     conv_handler = ConversationHandler(
@@ -425,4 +439,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+                   
