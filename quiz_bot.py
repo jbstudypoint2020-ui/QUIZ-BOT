@@ -5,7 +5,7 @@ import string
 import io
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from fpdf import FPDF
+from weasyprint import HTML
 
 from telegram import (
     Update,
@@ -40,10 +40,6 @@ ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
 DEFAULT_CREATOR_NAME = "Dr. Dev Kumar | JB STUDY POINT"
 
-# फ़ाइल की सटीक लोकेशन
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-FONT_PATH = os.path.join(CURRENT_DIR, "hindi.ttf")
-
 def get_all_quizzes():
     if os.path.exists(DB_FILE):
         try:
@@ -66,59 +62,110 @@ active_creators = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
+# वीज़ीप्रिंट आधारित शुद्ध देवनागरी PDF जनरेटर
 def generate_pdf_bytes(quiz_data):
-    if not os.path.exists(FONT_PATH):
-        raise Exception(f"फ़ॉन्ट फ़ाइल 'hindi.ttf' सर्वर पर नहीं मिली। कृपया चेक करें कि फ़ाइल सही अपलोड हुई है।")
-
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-
-    # हिंदी फ़ॉन्ट जोड़ें
-    pdf.add_font("Devanagari", "", FONT_PATH)
-    pdf.set_font("Devanagari", size=16)
-
-    title = str(quiz_data.get('title', 'Quiz Test'))
+    title = str(quiz_data.get('title', 'इतिहास टेस्ट'))
     creator = str(quiz_data.get('creator', DEFAULT_CREATOR_NAME))
     questions = quiz_data.get('questions', [])
 
-    # Title & Meta
-    pdf.set_text_color(26, 35, 126)
-    pdf.cell(0, 10, text=title, align="C", new_x="LMARGIN", new_y="NEXT")
-
-    pdf.set_font("Devanagari", size=10)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 6, text=f"Creator: {creator}  |  Total Questions: {len(questions)}", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="hi">
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&display=swap');
+            @page {{
+                size: A4;
+                margin: 15mm;
+                @bottom-right {{
+                    content: counter(page);
+                    font-size: 9pt;
+                    color: #888;
+                }}
+            }}
+            body {{
+                font-family: 'Noto Sans Devanagari', sans-serif;
+                font-size: 11pt;
+                line-height: 1.5;
+                color: #111;
+            }}
+            .header {{
+                text-align: center;
+                border-bottom: 2px solid #1a237e;
+                padding-bottom: 8px;
+                margin-bottom: 18px;
+            }}
+            .title {{
+                font-size: 18pt;
+                font-weight: 700;
+                color: #1a237e;
+                margin: 0;
+            }}
+            .meta {{
+                font-size: 10pt;
+                color: #555;
+                margin-top: 5px;
+            }}
+            .q-card {{
+                margin-bottom: 14px;
+                page-break-inside: avoid;
+            }}
+            .q-title {{
+                font-weight: 600;
+                font-size: 11pt;
+                color: #000;
+                margin-bottom: 4px;
+            }}
+            .option {{
+                margin-left: 18px;
+                font-size: 10.5pt;
+                color: #333;
+                margin-bottom: 2px;
+            }}
+            .correct-ans {{
+                margin-left: 18px;
+                font-size: 10pt;
+                font-weight: 600;
+                color: #2e7d32;
+                margin-top: 3px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="title">{title}</div>
+            <div class="meta">👤 Creator: {creator} &nbsp;|&nbsp; 📚 Total Questions: {len(questions)}</div>
+        </div>
+    """
 
     opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
 
     for i, q in enumerate(questions, 1):
-        pdf.set_font("Devanagari", size=11)
-        pdf.set_text_color(0, 0, 0)
-        q_text = f"Q{i}. {q.get('question', '')}"
-        pdf.multi_cell(0, 6, text=q_text, new_x="LMARGIN", new_y="NEXT")
+        q_text = str(q.get('question', '')).replace('<', '&lt;').replace('>', '&gt;')
+        html_content += f'<div class="q-card">'
+        html_content += f'<div class="q-title">Q{i}. {q_text}</div>'
 
         options = q.get('options', [])
-        pdf.set_font("Devanagari", size=10)
-        pdf.set_text_color(40, 40, 40)
         for o_idx, opt in enumerate(options):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            pdf.multi_cell(0, 5, text=f"   {lbl} {opt}", new_x="LMARGIN", new_y="NEXT")
+            clean_opt = str(opt).replace('<', '&lt;').replace('>', '&gt;')
+            html_content += f'<div class="option">{lbl} {clean_opt}</div>'
 
         correct_idx = q.get('correct_id', 0)
         corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
         correct_text = options[correct_idx] if correct_idx < len(options) else ""
+        clean_ans = str(correct_text).replace('<', '&lt;').replace('>', '&gt;')
 
-        pdf.set_font("Devanagari", size=10)
-        pdf.set_text_color(46, 125, 50)
-        pdf.multi_cell(0, 6, text=f"   Correct Answer: {corr_lbl} {correct_text}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(3)
+        html_content += f'<div class="correct-ans">Correct Answer: {corr_lbl} {clean_ans}</div>'
+        html_content += '</div>'
 
-    buffer = io.BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
-    return buffer
+    html_content += "</body></html>"
+
+    pdf_io = io.BytesIO()
+    HTML(string=html_content).write_pdf(pdf_io)
+    pdf_io.seek(0)
+    return pdf_io
 
 async def post_init(application):
     commands = [
@@ -169,7 +216,7 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ नया क्विज़ सत्र शुरू हुआ: *'{title}'*\n"
         f"🆔 ID: `{q_id}`\n"
         f"👤 Creator: *{DEFAULT_CREATOR_NAME}*\n\n"
-        "👉 अब **@QuizBot** से जितने चाहे पोल फ़ॉरवर्ड करें।\n"
+        "👉 अब **@QuizBot** से जितने चाहे पोल सीधे फ़ॉरवर्ड करें।\n"
         "सारे फ़ॉरवर्ड करने के बाद अंत में **/done** भेजें।"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -277,7 +324,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।", parse_mode="Markdown")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ हिंदी पीडीएफ तैयार की जा रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ शुद्ध हिंदी पीडीएफ तैयार की जा रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
         safe_filename = "quiz_paper.pdf"
