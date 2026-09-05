@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import string
 import io
 import threading
@@ -23,7 +24,7 @@ from telegram.ext import (
     ContextTypes
 )
 
-# Render Keep-Alive Server
+# Keep-Alive Server for Render
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -65,7 +66,13 @@ creator_sessions = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# Pillow आधारित शत-प्रतिशत शुद्ध हिंदी PDF जनरेटर
+def clean_question_text(raw_text):
+    # पोल में आने वाले [117/200] या 1. जैसे पुराने नंबर हटाना
+    text = re.sub(r"^\s*\[\d+/\d+\]\s*", "", raw_text)
+    text = re.sub(r"^\s*(Q|q)?\d+[\.\)\-:]\s*", "", text)
+    return text.strip()
+
+# प्रीमियम कलरफुल व अंतिम पेज Answer Key वाली PDF
 def generate_pdf_bytes(quiz_data):
     title = str(quiz_data.get('title', 'इतिहास टेस्ट'))
     creator = str(quiz_data.get('creator', DEFAULT_CREATOR))
@@ -73,14 +80,16 @@ def generate_pdf_bytes(quiz_data):
 
     PAGE_WIDTH = 1240
     PAGE_HEIGHT = 1754
-    MARGIN = 70
+    MARGIN = 65
     CONTENT_WIDTH = PAGE_WIDTH - (2 * MARGIN)
+    BG_COLOR = "#F8FAFC"  # प्रीमियम हल्का बैकग्राउंड
 
     font_title = ImageFont.truetype(FONT_PATH, 38)
-    font_meta = ImageFont.truetype(FONT_PATH, 24)
+    font_meta = ImageFont.truetype(FONT_PATH, 23)
     font_q = ImageFont.truetype(FONT_PATH, 26)
     font_opt = ImageFont.truetype(FONT_PATH, 23)
-    font_ans = ImageFont.truetype(FONT_PATH, 23)
+    font_ans_title = ImageFont.truetype(FONT_PATH, 32)
+    font_key = ImageFont.truetype(FONT_PATH, 22)
 
     def wrap_text(text, font, max_w, draw):
         words = text.split()
@@ -100,67 +109,102 @@ def generate_pdf_bytes(quiz_data):
         return lines
 
     pages = []
-    
+
     def new_page():
-        img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), "#FFFFFF")
+        img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), BG_COLOR)
         return img, ImageDraw.Draw(img)
 
     cur_img, cur_draw = new_page()
     y = MARGIN
 
-    # Title & Meta Header
+    # Top Header
     t_bbox = cur_draw.textbbox((0, 0), title, font=font_title)
-    cur_draw.text(((PAGE_WIDTH - (t_bbox[2] - t_bbox[0])) // 2, y), title, font=font_title, fill="#1a237e")
-    y += 55
+    cur_draw.text(((PAGE_WIDTH - (t_bbox[2] - t_bbox[0])) // 2, y), title, font=font_title, fill="#0D47A1")
+    y += 52
 
-    meta = f"Creator: {creator}  |  Questions: {len(questions)}  |  Timer: 20s"
+    meta = f"Creator: {creator}  |  Total Questions: {len(questions)}  |  Timer: 20s"
     m_bbox = cur_draw.textbbox((0, 0), meta, font=font_meta)
-    cur_draw.text(((PAGE_WIDTH - (m_bbox[2] - m_bbox[0])) // 2, y), meta, font=font_meta, fill="#666666")
-    y += 45
-    cur_draw.line([(MARGIN, y), (PAGE_WIDTH - MARGIN, y)], fill="#1a237e", width=2)
+    cur_draw.text(((PAGE_WIDTH - (m_bbox[2] - m_bbox[0])) // 2, y), meta, font=font_meta, fill="#546E7A")
+    y += 42
+    cur_draw.line([(MARGIN, y), (PAGE_WIDTH - MARGIN, y)], fill="#0D47A1", width=3)
     y += 30
 
     opt_labels = ["(A)", "(B)", "(C)", "(D)", "(E)", "(F)", "(G)", "(H)"]
+    answer_keys = []
 
     for i, q in enumerate(questions, 1):
-        q_lines = wrap_text(f"Q{i}. {q.get('question', '')}", font_q, CONTENT_WIDTH, cur_draw)
-        
+        clean_q = clean_question_text(q.get('question', ''))
+        q_lines = wrap_text(f"Q{i}. {clean_q}", font_q, CONTENT_WIDTH, cur_draw)
+
         opt_lines_list = []
         for o_idx, opt in enumerate(q.get('options', [])):
             lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            wrapped = wrap_text(f"{lbl} {opt}", font_opt, CONTENT_WIDTH - 40, cur_draw)
+            # विकल्प से पहले के डुप्लिकेट A/B/C हटाना
+            cleaned_opt = re.sub(r"^\s*[A-Ha-h1-9][\.\)\-:]\s*", "", opt)
+            wrapped = wrap_text(f"{lbl} {cleaned_opt}", font_opt, CONTENT_WIDTH - 40, cur_draw)
             opt_lines_list.append(wrapped)
 
         correct_idx = q.get('correct_id', 0)
         corr_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
-        options = q.get('options', [])
-        c_text = options[correct_idx] if correct_idx < len(options) else ""
-        ans_lines = wrap_text(f"Correct Answer: {corr_lbl} {c_text}", font_ans, CONTENT_WIDTH - 40, cur_draw)
+        answer_keys.append((f"Q{i}", corr_lbl))
 
         total_opt_lines = sum(len(l) for l in opt_lines_list)
-        needed_height = (len(q_lines) * 38) + (total_opt_lines * 34) + (len(ans_lines) * 36) + 40
+        needed_height = (len(q_lines) * 38) + (total_opt_lines * 34) + 26
 
         if y + needed_height > (PAGE_HEIGHT - MARGIN):
             pages.append(cur_img)
             cur_img, cur_draw = new_page()
             y = MARGIN
 
+        # रंगीन प्रश्न (Indigo / Royal Blue)
         for line in q_lines:
-            cur_draw.text((MARGIN, y), line, font=font_q, fill="#000000")
+            cur_draw.text((MARGIN, y), line, font=font_q, fill="#1A237E")
             y += 38
 
+        # रंगीन विकल्प (Dark Slate)
         for item_lines in opt_lines_list:
             for line in item_lines:
-                cur_draw.text((MARGIN + 35, y), line, font=font_opt, fill="#2b2b2b")
+                cur_draw.text((MARGIN + 32, y), line, font=font_opt, fill="#263238")
                 y += 34
 
-        for line in ans_lines:
-            cur_draw.text((MARGIN + 35, y), line, font=font_ans, fill="#2e7d32")
-            y += 36
-
-        y += 22
+        y += 20
 
     pages.append(cur_img)
+
+    # ----------------- अंतिम पेज: ANSWER KEY -----------------
+    ans_img, ans_draw = new_page()
+    ay = MARGIN + 20
+
+    ans_title = "— उत्तर तालिका (ANSWER KEY) —"
+    abbox = ans_draw.textbbox((0, 0), ans_title, font=font_ans_title)
+    ans_draw.text(((PAGE_WIDTH - (abbox[2] - abbox[0])) // 2, ay), ans_title, font=font_ans_title, fill="#B71C1C")
+    ay += 55
+
+    sub = f"परीक्षा: {title}  |  कुल प्रश्न: {len(questions)}"
+    sbbox = ans_draw.textbbox((0, 0), sub, font=font_meta)
+    ans_draw.text(((PAGE_WIDTH - (sbbox[2] - sbbox[0])) // 2, ay), sub, font=font_meta, fill="#546E7A")
+    ay += 40
+    ans_draw.line([(MARGIN + 80, ay), (PAGE_WIDTH - MARGIN - 80, ay)], fill="#B71C1C", width=2)
+    ay += 45
+
+    # 4-कॉलम सुंदर ग्रिड
+    cols = 4
+    col_w = (CONTENT_WIDTH - 60) // cols
+    start_x = MARGIN + 30
+    grid_y = ay
+
+    for idx, (qn, ans) in enumerate(answer_keys):
+        c = idx % cols
+        r = idx // cols
+        item_x = start_x + (c * col_w)
+        item_y = grid_y + (r * 42)
+
+        # प्रत्येक बॉक्स कार्ड
+        ans_draw.rectangle([item_x, item_y, item_x + col_w - 20, item_y + 36], fill="#FFFFFF", outline="#CFD8DC", width=1)
+        ans_draw.text((item_x + 12, item_y + 6), f"{qn}:", font=font_key, fill="#0D47A1")
+        ans_draw.text((item_x + 85, item_y + 6), f"{ans}", font=font_key, fill="#2E7D32")
+
+    pages.append(ans_img)
 
     pdf_io = io.BytesIO()
     if pages:
@@ -191,7 +235,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• नया क्विज़: `/create क्विज़ का नाम`\n"
         "• प्रश्न फ़ॉरवर्ड करने के बाद: `/done`\n"
         "• सभी क्विज़ देखें: `/myquizzes`\n"
-        "• सीधे PDF पाएँ: `/pdf QUIZ_ID`"
+        "• PDF डाउनलोड करें: `/pdf QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -357,7 +401,7 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें।")
+        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/pdf GGN80C50L`")
         return
     quiz_id = context.args[0].strip().upper()
     await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
@@ -368,7 +412,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` में कोई प्रश्न नहीं मिला।")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ शुद्ध हिंदी पीडीएफ तैयार की जा रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ रंगीन हिंदी पीडीएफ व उत्तर तालिका तैयार की जा रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
         safe_filename = f"{all_q[quiz_id].get('title', 'Quiz')}.pdf".replace(" ", "_")
@@ -377,7 +421,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             document=pdf_buffer,
             filename=safe_filename,
-            caption=f"📄 *{all_q[quiz_id]['title']}*\n👤 Creator: {all_q[quiz_id].get('creator', DEFAULT_CREATOR)}\n🆔 ID: `{quiz_id}`",
+            caption=f"📄 *{all_q[quiz_id]['title']}*\n👤 Creator: {all_q[quiz_id].get('creator', DEFAULT_CREATOR)}\n🆔 ID: `{quiz_id}`\n📌 *उत्तर तालिका अंतिम पेज पर है।*",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -426,7 +470,7 @@ async def send_quiz_poll(user_id, context: ContextTypes.DEFAULT_TYPE):
         q = quiz["questions"][idx]
         msg = await context.bot.send_poll(
             chat_id=state["chat_id"],
-            question=q["question"],
+            question=clean_question_text(q["question"]),
             options=q["options"],
             type="quiz",
             correct_option_id=q["correct_id"],
