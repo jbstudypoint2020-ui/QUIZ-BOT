@@ -399,7 +399,7 @@ def generate_pdf_bytes(quiz_data):
         pages[0].save(pdf_io, format="PDF", save_all=True, append_images=pages[1:], resolution=150.0)
     pdf_io.seek(0)
     return pdf_io
-
+        
 # --- BOT LOGIC ---
 async def post_init(application):
     commands = [
@@ -459,4 +459,414 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in creator_sessi
+    if user_id not in creator_sessions or creator_sessions[user_id]["step"] != "COLLECTING_POLLS":
+        q_id = generate_quiz_id()
+        creator_sessions[user_id] = {
+            "step": "COLLECTING_POLLS",
+            "title": "इतिहास टेस्ट",
+            "creator": DEFAULT_CREATOR,
+            "type": "free",
+            "promo": "None",
+            "timer": "20s",
+            "questions": [],
+            "id": q_id
+        }
+
+    poll = update.message.poll
+    if not poll:
+        return
+
+    options = [opt.text for opt in poll.options]
+    correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
+    explanation = poll.explanation if hasattr(poll, "explanation") and poll.explanation else ""
+
+    session = creator_sessions[user_id]
+    session["questions"].append({
+        "question": poll.question,
+        "options": options,
+        "correct_id": correct_id,
+        "explanation": explanation
+    })
+
+    count = len(session["questions"])
+    if count == 1 or count % 5 == 0:
+        await update.message.reply_text(f"✅ {count} प्रश्न सुरक्षित! ➡️ और भेजें या /done")
+
+async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in creator_sessions or not creator_sessions[user_id]["questions"]:
+        await update.message.reply_text("❌ कोई प्रश्न नहीं मिला। पहले पोल भेजें।")
+        return
+
+    creator_sessions[user_id]["step"] = "ASK_SECTION"
+    await update.message.reply_text("📁 Section quiz? yes/no")
+
+async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
+    if user_id not in creator_sessions:
+        return
+
+    session = creator_sessions[user_id]
+    step = session.get("step")
+
+    if step == "ASK_SECTION":
+        session["step"] = "ASK_PROMO"
+        await update.message.reply_text("📣 Send your promo message (shown periodically). Send 'skip' or 'no' to leave empty.")
+        return
+
+    elif step == "ASK_PROMO":
+        session["promo"] = "None" if text.lower() in ["no", "skip", "none"] else text
+        session["step"] = "ASK_TYPE"
+        await update.message.reply_text("🏷 Type (free/paid)")
+        return
+
+    elif step == "ASK_TYPE":
+        session["type"] = "paid" if "paid" in text.lower() else "free"
+        q_id = session["id"]
+        all_q = get_all_quizzes()
+        all_q[q_id] = session
+        save_all_quizzes(all_q)
+
+        total_q = len(session["questions"])
+        del creator_sessions[user_id]
+
+        card_text = (
+            f"🎉 *Quiz Created!*\n\n"
+            f"🏷 *Name:* {session['title']}\n"
+            f"❓ *Questions:* {total_q}\n"
+            f"🆔 *ID:* `{q_id}`\n"
+            f"🏷 *Type:* {session['type']}\n"
+            f"👤 *Creator:* {session['creator']}"
+        )
+
+        bot_info = await context.bot.get_me()
+        share_url = f"https://t.me/share/url?url=https://t.me/{bot_info.username}?start=PLAY_{q_id}&text={session['title']}"
+        add_group_url = f"https://t.me/{bot_info.username}?startgroup=PLAY_{q_id}"
+
+        keyboard = [
+            [InlineKeyboardButton("▶️ Start Quiz", callback_data=f"init_{q_id}")],
+            [InlineKeyboardButton("📄 Download Booklet PDF", callback_data=f"pdf_{q_id}")],
+            [InlineKeyboardButton("➕ Add to Group", url=add_group_url)],
+            [InlineKeyboardButton("📩 Share", url=share_url)]
+        ]
+        await update.message.reply_text(card_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ कृपया क्विज़ आईडी लिखें। उदाहरण: `/play GGN80C50L`")
+        return
+    quiz_id = context.args[0].strip().upper()
+    await prompt_quiz_settings(update.effective_chat.id, quiz_id, update.effective_user.id, context)
+
+# --- TIMING & EXPLANATION SETTINGS ---
+async def prompt_quiz_settings(chat_id, quiz_id, host_user_id, context: ContextTypes.DEFAULT_TYPE):
+    all_q = get_all_quizzes()
+    if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` उपलब्ध नहीं है।")
+        return
+
+    pending_setups[chat_id] = {
+        "quiz_id": quiz_id,
+        "host_id": host_user_id,
+        "timer": 20,
+        "show_exp": False
+    }
+
+    keyboard = [
+        [
+            InlineKeyboardButton("⏱ 15s", callback_data=f"set_time_{chat_id}_15"),
+            InlineKeyboardButton("⏱ 20s", callback_data=f"set_time_{chat_id}_20")
+        ],
+        [
+            InlineKeyboardButton("⏱ 25s", callback_data=f"set_time_{chat_id}_25"),
+            InlineKeyboardButton("⏱ 30s", callback_data=f"set_time_{chat_id}_30")
+        ]
+    ]
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"⚙️ *टेस्ट सेटअप:* `{all_q[quiz_id]['title']}`\n\nकृपया **टाइमर (प्रति प्रश्न समय)** चुनें:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = query.from_user.id
+
+    if data.startswith("init_"):
+        quiz_id = data.replace("init_", "")
+        await prompt_quiz_settings(query.message.chat_id, quiz_id, user_id, context)
+
+    elif data.startswith("set_time_"):
+        parts = data.split("_")
+        chat_id = int(parts[2])
+        timer_val = int(parts[3])
+
+        if chat_id in pending_setups:
+            if user_id != pending_setups[chat_id]["host_id"] and user_id != ADMIN_ID:
+                await query.answer("❌ केवल एडमिन ही यह चुन सकते हैं।", show_alert=True)
+                return
+
+            pending_setups[chat_id]["timer"] = timer_val
+
+            exp_keyboard = [
+                [
+                    InlineKeyboardButton("✅ हाँ (Show)", callback_data=f"set_exp_{chat_id}_yes"),
+                    InlineKeyboardButton("❌ नहीं (Hide)", callback_data=f"set_exp_{chat_id}_no")
+                ]
+            ]
+            await query.edit_message_text(
+                text=f"⏱ समय: *{timer_val} सेकंड* चुना गया।\n\nक्या आप **व्याख्या (Explanation)** दिखाना चाहते हैं?",
+                reply_markup=InlineKeyboardMarkup(exp_keyboard),
+                parse_mode="Markdown"
+            )
+
+    elif data.startswith("set_exp_"):
+        parts = data.split("_")
+        chat_id = int(parts[2])
+        exp_choice = parts[3]
+
+        if chat_id in pending_setups:
+            if user_id != pending_setups[chat_id]["host_id"] and user_id != ADMIN_ID:
+                await query.answer("❌ केवल एडमिन ही यह चुन सकते हैं।", show_alert=True)
+                return
+
+            pending_setups[chat_id]["show_exp"] = (exp_choice == "yes")
+            setup_data = pending_setups[chat_id]
+            q_id = setup_data["quiz_id"]
+            t_sec = setup_data["timer"]
+            s_exp = setup_data["show_exp"]
+
+            del pending_setups[chat_id]
+            await query.edit_message_text(f"✅ सेटअप पूरा हुआ! (समय: {t_sec}s | व्याख्या: {'हाँ' if s_exp else 'नहीं'})")
+            await start_group_quiz(chat_id, q_id, t_sec, s_exp, context)
+
+    elif data.startswith("pdf_"):
+        quiz_id = data.replace("pdf_", "")
+        await send_quiz_pdf(query.message.chat_id, quiz_id, context)
+
+async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
+    all_q = get_all_quizzes()
+    if quiz_id not in all_q or not all_q[quiz_id].get("questions"):
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` नहीं मिला।")
+        return
+
+    await context.bot.send_message(chat_id=chat_id, text="⏳ परीक्षा बुकलेट PDF तैयार हो रही है...")
+    try:
+        pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
+        safe_filename = f"{all_q[quiz_id].get('title', 'Exam')}_Booklet.pdf".replace(" ", "_")
+
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=pdf_buffer,
+            filename=safe_filename,
+            caption=f"📄 *{all_q[quiz_id]['title']} (Booklet Format)*\n📌 *उत्तर तालिका अंतिम पृष्ठ पर है।*",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ PDF त्रुटि: {str(e)}")
+
+# --- AUTO GROUP RUNNER ---
+async def start_group_quiz(chat_id, quiz_id, timer_sec, show_exp, context: ContextTypes.DEFAULT_TYPE):
+    all_q = get_all_quizzes()
+    quiz = all_q[quiz_id]
+    total = len(quiz["questions"])
+
+    active_group_quizzes[chat_id] = {
+        "quiz_id": quiz_id,
+        "index": 0,
+        "timer": int(timer_sec),
+        "show_exp": show_exp,
+        "users": {},
+        "current_msg_id": None,
+        "total_q": total
+    }
+
+    start_banner = (
+        f"🎯 *टेस्ट शुरू हो रहा है!*\n\n"
+        f"📝 टेस्ट: *{quiz['title']}*\n"
+        f"❓ कुल प्रश्न: *{total}*\n"
+        f"⏱ समय: *{timer_sec} सेकंड प्रति प्रश्न*\n"
+        f"💡 व्याख्या: *{'सक्रिय (ON)' if show_exp else 'बंद (OFF)'}*\n\n"
+        "⚡ *पहला प्रश्न 3 सेकंड में आ रहा है... तैयार रहें!*"
+    )
+    await context.bot.send_message(chat_id=chat_id, text=start_banner, parse_mode="Markdown")
+    await asyncio.sleep(3)
+    await send_next_question(chat_id, context)
+
+async def auto_timer_countdown(chat_id, msg_id, duration, context: ContextTypes.DEFAULT_TYPE):
+    await asyncio.sleep(duration)
+    if chat_id in active_group_quizzes:
+        sess = active_group_quizzes[chat_id]
+        if sess.get("current_msg_id") == msg_id:
+            try:
+                await context.bot.stop_poll(chat_id=chat_id, message_id=msg_id)
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+            await send_next_question(chat_id, context)
+
+async def send_next_question(chat_id, context: ContextTypes.DEFAULT_TYPE):
+    if chat_id not in active_group_quizzes:
+        return
+
+    sess = active_group_quizzes[chat_id]
+    all_q = get_all_quizzes()
+    quiz = all_q[sess["quiz_id"]]
+    idx = sess["index"]
+    timer_sec = int(sess["timer"])
+    show_exp = sess["show_exp"]
+
+    if idx < len(quiz["questions"]):
+        q = quiz["questions"][idx]
+        sess["index"] += 1
+
+        exp_text = q.get("explanation", "") if show_exp else ""
+        clean_q = clean_question_text(q['question'])
+
+        header_q = f"[{idx+1}/{len(quiz['questions'])}] ⏱ {timer_sec}s | {clean_q}"
+        if len(header_q) > 300:
+            header_q = header_q[:295] + "..."
+
+        try:
+            poll_msg = await context.bot.send_poll(
+                chat_id=chat_id,
+                question=header_q,
+                options=q["options"],
+                type="quiz",
+                correct_option_id=int(q["correct_id"]),
+                is_anonymous=False,
+                open_period=timer_sec,
+                explanation=exp_text[:200] if exp_text else None
+            )
+        except Exception:
+            poll_msg = await context.bot.send_poll(
+                chat_id=chat_id,
+                question=header_q,
+                options=q["options"],
+                type="quiz",
+                correct_option_id=int(q["correct_id"]),
+                is_anonymous=False,
+                explanation=exp_text[:200] if exp_text else None
+            )
+
+        sess["current_msg_id"] = poll_msg.message_id
+        context.bot_data[poll_msg.poll.id] = (chat_id, int(q["correct_id"]))
+
+        asyncio.create_task(auto_timer_countdown(chat_id, poll_msg.message_id, timer_sec, context))
+    else:
+        await finish_quiz_and_show_ranks(chat_id, context)
+
+async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p_ans = update.poll_answer
+    poll_id = p_ans.poll_id
+    user = p_ans.user
+
+    if poll_id in context.bot_data:
+        chat_id, correct_id = context.bot_data[poll_id]
+        if chat_id in active_group_quizzes:
+            sess = active_group_quizzes[chat_id]
+            uid = user.id
+            name = user.first_name or "Participant"
+
+            if uid not in sess["users"]:
+                sess["users"][uid] = {"name": name, "score": 0}
+
+            if p_ans.option_ids and p_ans.option_ids[0] == correct_id:
+                sess["users"][uid]["score"] += 1
+
+async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE):
+    if chat_id not in active_group_quizzes:
+        return
+
+    sess = active_group_quizzes[chat_id]
+    all_q = get_all_quizzes()
+    quiz = all_q[sess["quiz_id"]]
+    total_q = sess["total_q"]
+    participants = sess["users"]
+
+    del active_group_quizzes[chat_id]
+
+    if not participants:
+        res_text = (
+            f"🏁 *टेस्ट समाप्त!*\n\n"
+            f"📝 टेस्ट: *{quiz['title']}*\n"
+            "⚠️ किसी भी प्रतिभागी ने प्रश्नों का उत्तर नहीं दिया।"
+        )
+        await context.bot.send_message(chat_id=chat_id, text=res_text, parse_mode="Markdown")
+        return
+
+    sorted_users = sorted(participants.values(), key=lambda x: x["score"], reverse=True)
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    leaderboard_lines = []
+
+    for rank, p in enumerate(sorted_users, 1):
+        badge = medals[rank - 1] if rank <= 10 else f"{rank}."
+        leaderboard_lines.append(f"{badge} *{p['name']}* — {p['score']}/{total_q} सही")
+
+    rank_list_text = "\n".join(leaderboard_lines)
+
+    final_result_message = (
+        f"🏁 *टेस्ट परिणाम (Final Result)* 🏁\n\n"
+        f"📝 टेस्ट: *{quiz['title']}*\n"
+        f"❓ कुल प्रश्न: *{total_q}*\n"
+        f"👥 कुल प्रतिभागी: *{len(sorted_users)}*\n\n"
+        f"🏆 *रैंक व लीडरबोर्ड:*\n\n"
+        f"{rank_list_text}\n\n"
+        f"💐 *सभी प्रतिभागियों को बहुत-बहुत बधाई!*"
+    )
+    await context.bot.send_message(chat_id=chat_id, text=final_result_message, parse_mode="Markdown")
+
+async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    all_q = get_all_quizzes()
+    if not all_q:
+        await update.message.reply_text("कोई क्विज़ मौजूद नहीं है।")
+        return
+
+    lines = [f"🧩 *Your Quizzes*\nTotal: {len(all_q)}\n"]
+    for idx, (q_id, q_data) in enumerate(all_q.items(), 1):
+        lines.append(
+            f"*{idx}. {q_data.get('title', 'Quiz')}*\n"
+            f"🆔 ID: `{q_id}`\n"
+            f"❓ Questions: {len(q_data.get('questions', []))}\n"
+            f"🎯 Start Quiz: `/play {q_id}`\n"
+            f"📄 PDF: `/pdf {q_id}`\n"
+            "--------------------------------"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ क्विज़ आईडी लिखें। उदाहरण: `/pdf GGN80C50L`")
+        return
+    quiz_id = context.args[0].strip().upper()
+    await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
+
+def main():
+    threading.Thread(target=run_web_server, daemon=True).start()
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("create", create_command))
+    app.add_handler(CommandHandler("done", done_command))
+    app.add_handler(CommandHandler("myquizzes", my_quizzes))
+    app.add_handler(CommandHandler("play", play_command))
+    app.add_handler(CommandHandler("pdf", pdf_command))
+    app.add_handler(MessageHandler(filters.POLL, handle_incoming_poll))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+    app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(PollAnswerHandler(handle_poll_answer))
+
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
+        
