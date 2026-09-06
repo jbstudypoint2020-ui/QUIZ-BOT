@@ -29,7 +29,7 @@ from telegram.ext import (
     ContextTypes
 )
 
-TOKEN = "5096262921:AAHDRkHesbzcUs6BvDduK3IUEfnrFr_K0dE"
+TOKEN = "5096262921:AAFPAc7i8BgJIP4Yx3fUy6g8sKksy2PVM1I"
 ADMIN_ID = 1141231956
 DB_FILE = "quizzes.json"
 DEFAULT_CREATOR = "JB STUDY POINT"
