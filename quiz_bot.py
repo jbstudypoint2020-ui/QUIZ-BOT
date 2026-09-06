@@ -159,6 +159,7 @@ def generate_pdf_bytes(quiz_data):
     dummy_draw = ImageDraw.Draw(dummy_img)
 
     q_blocks = []
+    <br>
     opt_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
     answer_keys = []
 
