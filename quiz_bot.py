@@ -63,12 +63,10 @@ pending_setups = {}
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# --- उन्नत प्रश्न क्लीनर (अब टाइमर, [15s], [⏱ 15s] आदि को पूरी तरह हटा देगा) ---
 def clean_question_text(raw_text):
     if not raw_text:
         return ""
     text = str(raw_text)
-    # पोल के हेडर और टाइमर मार्क्स हटाना
     text = re.sub(r"\[\s*\d+\s*/\s*\d+\s*\]", "", text)
     text = re.sub(r"⏱\s*\d+s?", "", text)
     text = re.sub(r"\d+s\s*\|", "", text)
@@ -187,7 +185,7 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
-        self.wfile.write(HTML_TEMPLATE.encode("utf-8"))
+        self.wfile.write(HTML_TEMPLATE.encode("text/html; charset=utf-8"))
 
     def do_POST(self):
         if self.path == "/save_quiz":
@@ -233,9 +231,9 @@ class QuizCreatorServer(BaseHTTPRequestHandler):
                 save_all_quizzes(all_q)
                 threading.Thread(target=send_quiz_email_backup, args=(title, q_id, len(questions), q_obj)).start()
 
-                resp = f"<html><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट '{title}' बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>📧 बैकअप ईमेल पर भेजा गया।</p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
+                resp = f"<html><head><meta charset='UTF-8'></head><body style='text-align:center;font-family:sans-serif;padding:40px;'><h2>✅ टेस्ट '{title}' बना दिया गया!</h2><p>Quiz ID: <b>{q_id}</b></p><p>📧 बैकअप ईमेल पर भेजा गया।</p><p>Telegram में भेजें: <code>/play {q_id}</code></p><a href='/'>वापस जाएँ</a></body></html>"
             else:
-                resp = "<html><body><h3>कोई सवाल नहीं मिला।</h3><a href='/'>वापस</a></body></html>"
+                resp = "<html><head><meta charset='UTF-8'></head><body><h3>कोई सवाल नहीं मिला।</h3><a href='/'>वापस</a></body></html>"
 
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
@@ -247,30 +245,22 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
     server.serve_forever()
 
-# --- ULTRA HD 300 DPI PDF BOOKLET ---
+# --- PROFESSIONAL EXAM PAPER PDF GENERATOR ---
 def generate_pdf_bytes(quiz_data):
     PAGE_W = 2480
     PAGE_H = 3508
-    MARGIN_X = 100
-    MARGIN_Y = 80
-    COL_GAP = 70
+    MARGIN_X = 140
+    MARGIN_Y = 140
+    COL_GAP = 90
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
-    f_jb_big = ImageFont.truetype(FONT_PATH, 68)
-    f_sub = ImageFont.truetype(FONT_PATH, 28)
-    f_title = ImageFont.truetype(FONT_PATH, 48)
-    f_tbl_head = ImageFont.truetype(FONT_PATH, 22)
-    f_tbl_val = ImageFont.truetype(FONT_PATH, 26)
-    f_inst_title = ImageFont.truetype(FONT_PATH, 26)
-    f_inst = ImageFont.truetype(FONT_PATH, 23)
-    f_bar = ImageFont.truetype(FONT_PATH, 28)
+    f_sub = ImageFont.truetype(FONT_PATH, 26)
     f_q = ImageFont.truetype(FONT_PATH, 28)
     f_opt = ImageFont.truetype(FONT_PATH, 26)
-    f_ans_title = ImageFont.truetype(FONT_PATH, 54)
-    f_key = ImageFont.truetype(FONT_PATH, 30)
+    f_ans_title = ImageFont.truetype(FONT_PATH, 50)
+    f_key = ImageFont.truetype(FONT_PATH, 28)
 
     title = str(quiz_data.get('title', 'MOCK TEST'))
-    creator = str(quiz_data.get('creator', DEFAULT_CREATOR))
     questions = quiz_data.get('questions', [])
     total_q = len(questions)
 
@@ -293,86 +283,32 @@ def generate_pdf_bytes(quiz_data):
 
     pages = []
 
-    def create_new_page(is_first=False):
-        img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
+    def create_page():
+        img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFDF5")
         draw = ImageDraw.Draw(img)
 
-        draw.text((MARGIN_X, 40), "JB STUDY POINT — MOCK TEST SERIES", font=f_sub, fill="#666666")
-        draw.text((PAGE_W - MARGIN_X - 440, 40), "FOR PRACTICE PURPOSE ONLY", font=f_sub, fill="#666666")
-        draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#CCCCCC", width=2)
+        draw.rectangle([80, 80, PAGE_W - 80, PAGE_H - 80], outline="#8B0000", width=6)
+        draw.rectangle([95, 95, PAGE_W - 95, PAGE_H - 95], outline="#DAA520", width=3)
 
-        y_offset = MARGIN_Y + 25
+        mid_x = PAGE_W // 2
+        draw.line([(mid_x, 160), (mid_x, PAGE_H - 160)], fill="#B0C4DE", width=3)
 
-        if is_first:
-            jb_bbox = draw.textbbox((0, 0), "JB STUDY POINT", font=f_jb_big)
-            jb_x = (PAGE_W - (jb_bbox[2] - jb_bbox[0])) // 2
-            draw.text((jb_x, y_offset), "JB STUDY POINT", font=f_jb_big, fill="#8B0000")
-            draw.text((jb_x + 1, y_offset), "JB STUDY POINT", font=f_jb_big, fill="#8B0000")
-            y_offset += 78
+        draw.text((120, 105), "JB STUDY POINT YOUTUBE CHANNEL", font=f_sub, fill="#8B0000")
+        draw.text((PAGE_W - 520, 105), "Mob: 8218345167", font=f_sub, fill="#000000")
 
-            sub_header = f"{creator.upper()} | TEST SERIES & ACADEMIC CELL"
-            s_bbox = draw.textbbox((0, 0), sub_header, font=f_sub)
-            draw.text(((PAGE_W - (s_bbox[2] - s_bbox[0])) // 2, y_offset), sub_header, font=f_sub, fill="#333333")
-            y_offset += 45
+        txt_img = Image.new("RGBA", (PAGE_W, PAGE_H), (255, 255, 255, 0))
+        txt_draw = ImageDraw.Draw(txt_img)
+        wm_font = ImageFont.truetype(FONT_PATH, 150)
+        txt_draw.text((PAGE_W // 2 - 580, PAGE_H // 2 - 90), "JB STUDY POINT", font=wm_font, fill=(220, 180, 180, 85))
+        rotated_wm = txt_img.rotate(30, resample=Image.Resampling.BICUBIC, center=(PAGE_W // 2, PAGE_H // 2))
+        img.paste(Image.alpha_composite(img.convert("RGBA"), rotated_wm).convert("RGB"))
 
-            draw.line([(MARGIN_X, y_offset), (PAGE_W - MARGIN_X, y_offset)], fill="#8B0000", width=4)
-            y_offset += 25
+        return img, draw
 
-            t_bbox = draw.textbbox((0, 0), title.upper(), font=f_title)
-            draw.text(((PAGE_W - (t_bbox[2] - t_bbox[0])) // 2, y_offset), title.upper(), font=f_title, fill="#000000")
-            y_offset += 60
-
-            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 150], outline="#333333", width=2)
-            draw.line([(MARGIN_X + 440, y_offset), (MARGIN_X + 440, y_offset + 150)], fill="#333333", width=2)
-            draw.line([(PAGE_W - MARGIN_X - 640, y_offset), (PAGE_W - MARGIN_X - 640, y_offset + 150)], fill="#333333", width=2)
-            draw.line([(MARGIN_X, y_offset + 90), (PAGE_W - MARGIN_X, y_offset + 90)], fill="#333333", width=2)
-
-            draw.text((MARGIN_X + 20, y_offset + 12), "TEST NO.", font=f_tbl_head, fill="#444444")
-            draw.text((MARGIN_X + 20, y_offset + 42), "01", font=f_tbl_val, fill="#000000")
-
-            draw.text((MARGIN_X + 460, y_offset + 12), "ROLL NO.", font=f_tbl_head, fill="#444444")
-            rx = MARGIN_X + 460
-            for _ in range(8):
-                draw.rectangle([rx, y_offset + 40, rx + 32, y_offset + 76], outline="#666666", width=2)
-                rx += 40
-
-            draw.text((PAGE_W - MARGIN_X - 620, y_offset + 12), "BOOKLET SERIES", font=f_tbl_head, fill="#444444")
-            bx = PAGE_W - MARGIN_X - 620
-            for char, active in [("A", True), ("B", False), ("C", False), ("D", False)]:
-                if active:
-                    draw.ellipse([bx, y_offset + 42, bx + 32, y_offset + 74], fill="#8B0000")
-                    draw.text((bx + 8, y_offset + 44), char, font=f_tbl_val, fill="#FFFFFF")
-                else:
-                    draw.ellipse([bx, y_offset + 42, bx + 32, y_offset + 74], outline="#666666", width=2)
-                    draw.text((bx + 8, y_offset + 44), char, font=f_tbl_val, fill="#000000")
-                bx += 48
-
-            draw.text((MARGIN_X + 20, y_offset + 104), "Time: 2 Hours", font=f_tbl_val, fill="#111111")
-            draw.text((MARGIN_X + 460, y_offset + 104), f"Total Questions: {total_q}", font=f_tbl_val, fill="#111111")
-            draw.text((PAGE_W - MARGIN_X - 620, y_offset + 104), f"Max. Marks: {total_q * 2}", font=f_tbl_val, fill="#111111")
-            y_offset += 175
-
-            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 185], outline="#DDDDDD", width=2)
-            draw.text((MARGIN_X + 30, y_offset + 12), "INSTRUCTIONS / निर्देश", font=f_inst_title, fill="#8B0000")
-            draw.text((MARGIN_X + 30, y_offset + 48), "1. इस पुस्तिका में कुल बहुविकल्पीय प्रश्न हैं। प्रत्येक प्रश्न 2 अंक का है।", font=f_inst, fill="#333333")
-            draw.text((MARGIN_X + 30, y_offset + 80), "2. ओएमआर उत्तर पत्रक पर केवल नीले/काले बॉल-पॉइंट पेन से गोलों को गहरा करें।", font=f_inst, fill="#333333")
-            draw.text((MARGIN_X + 30, y_offset + 112), "3. परीक्षा कक्ष में मोबाइल फोन या किसी भी इलेक्ट्रॉनिक उपकरण का प्रयोग वर्जित है।", font=f_inst, fill="#333333")
-            draw.text((MARGIN_X + 30, y_offset + 144), "4. उत्तर तालिका अंतिम पृष्ठ पर प्रदान की गई है।", font=f_inst, fill="#333333")
-            y_offset += 205
-
-            draw.rectangle([MARGIN_X, y_offset, PAGE_W - MARGIN_X, y_offset + 50], fill="#8B0000")
-            r_box = draw.textbbox((0, 0), "GENERAL PAPER & SUBJECT SECTION", font=f_bar)
-            draw.text(((PAGE_W - (r_box[2] - r_box[0])) // 2, y_offset + 10), "GENERAL PAPER & SUBJECT SECTION", font=f_bar, fill="#FFFFFF")
-            y_offset += 75
-        else:
-            y_offset = 120
-
-        return img, draw, y_offset
-
-    cur_img, cur_draw, start_y = create_new_page(is_first=True)
+    cur_img, cur_draw = create_page()
     cur_col = 0
-    cur_y = start_y
-    col_tops = [start_y, start_y]
+    cur_y = MARGIN_Y + 70
+    col_tops = [cur_y, cur_y]
 
     opt_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
     answer_keys = []
@@ -393,7 +329,7 @@ def generate_pdf_bytes(quiz_data):
         answer_keys.append((f"{i}", c_lbl))
 
         tot_opt_lines = sum(len(x) for x in opt_items)
-        block_h = (len(q_lines) * 44) + (tot_opt_lines * 38) + 30
+        block_h = (len(q_lines) * 44) + (tot_opt_lines * 38) + 35
 
         if cur_y + block_h > (PAGE_H - MARGIN_Y):
             if cur_col == 0:
@@ -401,42 +337,37 @@ def generate_pdf_bytes(quiz_data):
                 cur_y = col_tops[1]
             else:
                 pages.append(cur_img)
-                cur_img, cur_draw, start_y = create_new_page(is_first=False)
+                cur_img, cur_draw = create_page()
                 cur_col = 0
-                col_tops = [start_y, start_y]
-                cur_y = start_y
+                cur_y = MARGIN_Y + 70
+                col_tops = [cur_y, cur_y]
 
         col_x = MARGIN_X if cur_col == 0 else MARGIN_X + COL_W + COL_GAP
 
+        q_box_h = (len(q_lines) * 44) + 10
+        cur_draw.rectangle([col_x - 10, cur_y - 5, col_x + COL_W + 10, cur_y + q_box_h], fill="#EAE6FF", outline="#7B68EE", width=2)
+
         for line in q_lines:
-            cur_draw.text((col_x, cur_y), line, font=f_q, fill="#000000")
+            cur_draw.text((col_x, cur_y), line, font=f_q, fill="#000080")
             cur_y += 44
 
+        cur_y += 8
         for item in opt_items:
             for line in item:
-                cur_draw.text((col_x + 24, cur_y), line, font=f_opt, fill="#222222")
+                cur_draw.text((col_x + 15, cur_y), line, font=f_opt, fill="#111111")
                 cur_y += 38
 
-        cur_y += 24
+        cur_y += 30
 
     pages.append(cur_img)
 
-    ans_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
-    ans_draw = ImageDraw.Draw(ans_img)
-    ans_draw.text((MARGIN_X, 40), "JB STUDY POINT — ANSWER KEY & EVALUATION", font=f_sub, fill="#666666")
-    ans_draw.line([(MARGIN_X, 75), (PAGE_W - MARGIN_X, 75)], fill="#8B0000", width=4)
-
-    ay = 120
-    t_box = ans_draw.textbbox((0, 0), "ANSWER KEY / उत्तर तालिका", font=f_ans_title)
-    ans_draw.text(((PAGE_W - (t_box[2] - t_box[0])) // 2, ay), "ANSWER KEY / उत्तर तालिका", font=f_ans_title, fill="#8B0000")
-    ay += 80
-
-    sub_txt = f"{title}  |  Total Questions: {len(questions)}  |  Booklet Series: A"
-    s_box = ans_draw.textbbox((0, 0), sub_txt, font=f_sub)
-    ans_draw.text(((PAGE_W - (s_box[2] - s_box[0])) // 2, ay), sub_txt, font=f_sub, fill="#555555")
+    ans_img, ans_draw = create_page()
+    ay = MARGIN_Y + 80
+    ans_draw.text(((PAGE_W - 600) // 2, ay), "ANSWER KEY / उत्तर तालिका", font=f_ans_title, fill="#8B0000")
     ay += 70
-    ans_draw.line([(MARGIN_X + 200, ay), (PAGE_W - MARGIN_X - 200, ay)], fill="#8B0000", width=2)
-    ay += 70
+    sub_txt = f"{title} | Total: {len(questions)} Questions"
+    ans_draw.text(((PAGE_W - 500) // 2, ay), sub_txt, font=f_sub, fill="#333333")
+    ay += 60
 
     cols = 5
     usable_w = PAGE_W - (2 * MARGIN_X) - 80
@@ -447,64 +378,15 @@ def generate_pdf_bytes(quiz_data):
         c = idx % cols
         r = idx // cols
         ix = sx + (c * cw)
-        iy = ay + (r * 68)
-        ans_draw.rectangle([ix, iy, ix + cw - 30, iy + 56], outline="#CCCCCC", fill="#FDFDFD", width=2)
-        ans_draw.text((ix + 16, iy + 12), f"Q.{qn}", font=f_key, fill="#000000")
-        ans_draw.text((ix + cw - 90, iy + 12), ans, font=f_key, fill="#8B0000")
+        iy = ay + (r * 65)
+        ans_draw.rectangle([ix, iy, ix + cw - 25, iy + 52], outline="#8B0000", fill="#FFFFFF", width=2)
+        ans_draw.text((ix + 12, iy + 10), f"Q.{qn}", font=f_key, fill="#000000")
+        ans_draw.text((ix + cw - 75, iy + 10), ans, font=f_key, fill="#8B0000")
 
     pages.append(ans_img)
     pdf_io = io.BytesIO()
     if pages:
         pages[0].save(pdf_io, format="PDF", save_all=True, append_images=pages[1:], resolution=300.0)
-    pdf_io.seek(0)
-    return pdf_io
-
-# --- PRINTABLE OMR GENERATOR ---
-def generate_omr_sheet_bytes():
-    PAGE_W = 2480
-    PAGE_H = 3508
-    MARGIN_X = 120
-    MARGIN_Y = 100
-
-    img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFFFF")
-    draw = ImageDraw.Draw(img)
-
-    f_jb = ImageFont.truetype(FONT_PATH, 54)
-    f_sub = ImageFont.truetype(FONT_PATH, 24)
-    f_box = ImageFont.truetype(FONT_PATH, 22)
-    f_num = ImageFont.truetype(FONT_PATH, 22)
-    f_opt = ImageFont.truetype(FONT_PATH, 20)
-
-    draw.rectangle([MARGIN_X, MARGIN_Y, PAGE_W - MARGIN_X, MARGIN_Y + 180], outline="#8B0000", width=4)
-    draw.text((MARGIN_X + 40, MARGIN_Y + 25), "JB STUDY POINT — OMR ANSWER SHEET", font=f_jb, fill="#8B0000")
-    draw.text((MARGIN_X + 40, MARGIN_Y + 95), "Use Blue or Black Ball Point Pen only. Darken bubbles completely.", font=f_sub, fill="#444444")
-    draw.text((MARGIN_X + 40, MARGIN_Y + 135), "Name: _______________________________   Roll No: ___________________________", font=f_box, fill="#111111")
-
-    cols = 4
-    q_per_col = 25
-    col_w = (PAGE_W - (2 * MARGIN_X) - 150) // cols
-    sy = MARGIN_Y + 240
-
-    for c in range(cols):
-        cx = MARGIN_X + c * (col_w + 50)
-        draw.rectangle([cx, sy, cx + col_w, sy + (q_per_col * 110) + 40], outline="#CCCCCC", width=2)
-        draw.rectangle([cx, sy, cx + col_w, sy + 45], fill="#8B0000")
-        draw.text((cx + 15, sy + 8), f"Q.NO    A   B   C   D", font=f_box, fill="#FFFFFF")
-
-        qy = sy + 65
-        for row in range(q_per_col):
-            q_num = (c * q_per_col) + (row + 1)
-            draw.text((cx + 15, qy + 4), f"{q_num:02d}", font=f_num, fill="#111111")
-
-            ox = cx + 110
-            for opt_char in ["A", "B", "C", "D"]:
-                draw.ellipse([ox, qy, ox + 36, qy + 36], outline="#333333", width=2)
-                draw.text((ox + 10, qy + 6), opt_char, font=f_opt, fill="#333333")
-                ox += 65
-            qy += 110
-
-    pdf_io = io.BytesIO()
-    img.save(pdf_io, format="PDF", resolution=300.0)
     pdf_io.seek(0)
     return pdf_io
     # --- BOT LOGIC & GAME ENGINE ---
@@ -537,7 +419,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• टेस्ट सूची: `/myquizzes`\n"
         "• ईमेल पर बैकअप: `/backup`\n"
         "• OMR शीट डाउनलोड करें: `/omr`\n"
-        "• JSON बैकअप फ़ाइल भेजकर रिस्टोर भी कर सकते हैं।\n"
+        "• PDF बुकलेट डाउनलोड करें: `/pdf QUIZ_ID`\n"
         "• ग्रुप में चलायें: `/play QUIZ_ID`"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
@@ -586,7 +468,6 @@ async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYP
     options = [clean_question_text(opt.text) for opt in poll.options]
     correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
     explanation = clean_question_text(poll.explanation) if hasattr(poll, "explanation") and poll.explanation else ""
-
     cleaned_q = clean_question_text(poll.question)
 
     session = creator_sessions[user_id]
@@ -720,7 +601,7 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"⏳ कुल {len(all_q)} टेस्टों का बैकअप {GMAIL_USER} पर भेजा जा रहा है...")
     threading.Thread(target=send_quiz_email_backup, args=("All Tests Backup", "FULL_BACKUP", len(all_q), all_q)).start()
-    await update.message.reply_text("✅ बैकअप ईमेल भेज दिया गया है! कृपया अपना इनबॉक्स या Updates फ़ोल्डर देखें।")
+    await update.message.reply_text("✅ बैकअप ईमेल भेज दिया गया है!")
 
 async def omr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 100 प्रश्नों की OMR शीट तैयार हो रही है...")
@@ -730,7 +611,7 @@ async def omr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=update.effective_chat.id,
             document=omr_buffer,
             filename="JB_STUDY_POINT_100Q_OMR_Sheet.pdf",
-            caption="📄 *100 प्रश्नों की प्रिंटेबल OMR शीट (300 DPI Ultra-HD)*\nप्रिंट करके ऑफलाइन अभ्यास के लिए उपयोग करें।"
+            caption="📄 *100 प्रश्नों की प्रिंटेबल OMR शीट (300 DPI Ultra-HD)*"
         )
     except Exception as e:
         await update.message.reply_text(f"❌ OMR त्रुटि: {str(e)}")
@@ -796,7 +677,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             pending_setups[chat_id]["timer"] = timer_val
-
             neg_keyboard = [
                 [
                     InlineKeyboardButton("0.0 (No Negative)", callback_data=f"set_neg_{chat_id}_0"),
@@ -817,7 +697,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("_")
         chat_id = int(parts[2])
         neg_code = parts[3]
-
         neg_map = {"0": 0.0, "33": 0.33, "50": 0.50, "25": 0.25}
         neg_val = neg_map.get(neg_code, 0.0)
 
@@ -827,7 +706,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             pending_setups[chat_id]["negative"] = neg_val
-
             exp_keyboard = [
                 [
                     InlineKeyboardButton("✅ हाँ (Show)", callback_data=f"set_exp_{chat_id}_yes"),
@@ -856,7 +734,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             t_sec = setup_data["timer"]
             neg_val = setup_data["negative"]
             s_exp = setup_data["show_exp"]
-
             is_private = (query.message.chat.type == "private")
 
             del pending_setups[chat_id]
@@ -873,7 +750,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"❌ क्विज़ `{quiz_id}` नहीं मिला।")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text="⏳ हाई-डेफिनिशन (300 DPI) बुकलेट PDF तैयार हो रही है...")
+    await context.bot.send_message(chat_id=chat_id, text="⏳ असली परीक्षा पेपर जैसी HD बुकलेट PDF तैयार हो रही है...")
     try:
         pdf_buffer = generate_pdf_bytes(all_q[quiz_id])
         safe_filename = f"{all_q[quiz_id].get('title', 'Exam')}_Booklet.pdf".replace(" ", "_")
@@ -882,7 +759,7 @@ async def send_quiz_pdf(chat_id, quiz_id, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             document=pdf_buffer,
             filename=safe_filename,
-            caption=f"📄 *{all_q[quiz_id]['title']} (Booklet Format)*\n📌 *उत्तर तालिका अंतिम पृष्ठ पर है।*",
+            caption=f"📄 *{all_q[quiz_id]['title']} (Exam Booklet)*\n📌 *JB STUDY POINT | Mob: 8218345167*",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -912,8 +789,7 @@ async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, show_exp, is_pr
         f"📝 टेस्ट: *{quiz['title']}*\n"
         f"❓ कुल प्रश्न: *{total}*\n"
         f"⏱ समय: *{timer_sec}s प्रति प्रश्न*\n"
-        f"⚠️ निगेटिव मार्किंग: *{'-' + str(neg_val) if neg_val > 0 else 'नहीं (0)'}*\n"
-        f"💡 व्याख्या: *{'सक्रिय (ON)' if show_exp else 'बंद (OFF)'}*\n\n"
+        f"⚠️ निगेटिव मार्किंग: *{'-' + str(neg_val) if neg_val > 0 else 'नहीं (0)'}*\n\n"
         "⚡ *पहला प्रश्न 2 सेकंड में आ रहा है... तैयार रहें!*"
     )
     await context.bot.send_message(chat_id=chat_id, text=start_banner, parse_mode="Markdown")
@@ -1057,7 +933,6 @@ async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE
         return
 
     sorted_users = sorted(participants.items(), key=lambda x: x[1]["score"], reverse=True)
-
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     leaderboard_lines = []
 
@@ -1077,43 +952,31 @@ async def finish_quiz_and_show_ranks(chat_id, context: ContextTypes.DEFAULT_TYPE
                 wrong_review = "\n\n❌ *आपके द्वारा गलत किए गए प्रश्न व सही उत्तर:*\n"
                 for w in p["wrong_questions"][:10]:
                     wrong_review += f"• *प्र.{w['q_num']}:* {w['question'][:60]}...\n👉 *सही उत्तर:* `{w['correct_opt']}`\n"
-                if len(p["wrong_questions"]) > 10:
-                    wrong_review += f"\n...और {len(p['wrong_questions']) - 10} अन्य गलत प्रश्न।"
 
             student_card = (
                 f"📋 *आपका परीक्षा परिणाम (Detailed Scorecard)*\n\n"
                 f"📝 टेस्ट: *{quiz['title']}*\n"
                 f"🏆 रैंक: *#{rank}*\n"
-                f"✅ सही उत्तर: *{p['correct']}*\n"
-                f"❌ गलत उत्तर: *{p['wrong']}*\n"
-                f"⚠️ निगेटिव कटे अंक: *{round(p['wrong'] * neg_rate, 2)}*\n"
+                f"✅ सही: *{p['correct']}* | ❌ गलत: *{p['wrong']}*\n"
                 f"🎯 कुल प्राप्तांक: *{final_sc} / {total_q}*\n"
                 f"{wrong_review}\n\n"
-                f"💐 *{quiz.get('creator', DEFAULT_CREATOR)} की ओर से शुभकामनाएँ!*"
+                f"💐 *JB STUDY POINT (Mob: 8218345167)*"
             )
             await context.bot.send_message(chat_id=uid, text=student_card, parse_mode="Markdown")
         except Exception:
             pass
 
     rank_list_text = "\n".join(leaderboard_lines)
-
     cutoff_card = (
         f"\n\n📊 *अनुमानित कट-ऑफ (Estimated Cut-Off):*\n"
-        f"• UR (General): *{gen_cut}*\n"
-        f"• OBC / EWS: *{obc_cut}*\n"
-        f"• SC / ST: *{sc_cut}*"
+        f"• UR: *{gen_cut}* | OBC: *{obc_cut}* | SC: *{sc_cut}*"
     )
 
     final_msg = (
         f"🏁 *टेस्ट परिणाम (Final Result)* 🏁\n\n"
         f"📝 टेस्ट: *{quiz['title']}*\n"
-        f"❓ कुल प्रश्न: *{total_q}*\n"
-        f"👥 कुल प्रतिभागी: *{len(sorted_users)}*\n"
-        f"⚠️ निगेटिव मार्किंग: *{'-' + str(neg_rate) if neg_rate > 0 else 'शून्य'}*\n\n"
-        f"🏆 *रैंक व लीडरबोर्ड:*\n\n"
-        f"{rank_list_text}"
-        f"{cutoff_card}\n\n"
-        f"📩 *सभी प्रतिभागियों को व्यक्तिगत समीक्षा व स्कोरकार्ड भेज दिया गया है।*"
+        f"👥 कुल प्रतिभागी: *{len(sorted_users)}*\n\n"
+        f"🏆 *रैंक व लीडरबोर्ड:*\n\n{rank_list_text}{cutoff_card}"
     )
     await context.bot.send_message(chat_id=chat_id, text=final_msg, parse_mode="Markdown")
 
