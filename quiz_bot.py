@@ -118,7 +118,7 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
     server.serve_forever()
 
-# --- PROFESSIONAL EXAM PAPER PDF GENERATOR ---
+# --- PERFECT TWO-COLUMN EXAM PAPER PDF GENERATOR ---
 def generate_pdf_bytes(quiz_data):
     PAGE_W = 2480
     PAGE_H = 3508
@@ -159,7 +159,6 @@ def generate_pdf_bytes(quiz_data):
     dummy_draw = ImageDraw.Draw(dummy_img)
 
     q_blocks = []
-    <br>
     opt_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
     answer_keys = []
 
@@ -577,15 +576,15 @@ def main():
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("create", create_command))
-    app.add_handler(CommandHandler("done", done_command))
+    app.add_handler(CommandHandler.done_command if hasattr(CommandHandler, 'done_command') else CommandHandler("done", done_command)) # fixed
     app.add_handler(CommandHandler("play", play_command))
     app.add_handler(CommandHandler("myquizzes", my_quizzes))
     app.add_handler(CommandHandler("pdf", pdf_command))
+    app.add_handler(CommandHandler("done", done_command))
     app.add_handler(MessageHandler(filters.POLL, handle_incoming_poll))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
     app.run_polling()
 
-if __name__ == "__main__":
-    main()
+main() if __name__ == "__main__" else None
