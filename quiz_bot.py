@@ -1,27 +1,24 @@
-import asyncio
-import io
 import json
 import os
 import random
 import re
-import smtplib
 import string
+import io
+import asyncio
 import threading
-from email.mime.application import MIMEApplication
-from email.mime.multipart import MIMEMultipart
+import smtplib
 from email.mime.text import MIMEText
-
+from email.mime.multipart import MIMEMultipart
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import parse_qs
 from PIL import Image, ImageDraw, ImageFont
-import firebase_admin
-from firebase_admin import credentials, firestore
 
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    BotCommand,
+    BotCommand
 )
-
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -29,655 +26,566 @@ from telegram.ext import (
     PollAnswerHandler,
     MessageHandler,
     filters,
-    ContextTypes,
+    ContextTypes
 )
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "1141231956"))
-DB_FILE = os.environ.get("DB_FILE", "quizzes.json")
+TOKEN = "5096262921:AAFPAc7i8BgJIP4Yx3fUy6g8sKksy2PVM1I"
+ADMIN_ID = 1141231956
+DB_FILE = "quizzes.json"
 DEFAULT_CREATOR = "JB STUDY POINT"
 
-# Gmail
-GMAIL_USER = os.environ.get("GMAIL_USER", "").strip()
-GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
-
-# Firebase Service Account File (Path set via Environment Variable or local default)
-FIREBASE_CRED_PATH = os.environ.get("FIREBASE_CRED_PATH", "firebase_credentials.json")
+GMAIL_USER = "jbstudypoint2020@gmail.com"
+GMAIL_PASS = "oqxsihlmuxmsztqw"
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_PATH = os.path.join(CURRENT_DIR, "hindi.ttf")
 
-if not TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is missing.")
-
-
-# ============================================================
-# FIREBASE INITIALIZATION
-# ============================================================
-
-db_firestore = None
-
-if os.path.exists(FIREBASE_CRED_PATH):
-    try:
-        cred = credentials.Certificate(FIREBASE_CRED_PATH)
-        firebase_admin.initialize_app(cred)
-        db_firestore = firestore.client()
-        print("🔥 Firebase Admin SDK Successfully Initialized!")
-    except Exception as e:
-        print(f"⚠️ Firebase Initialization Error: {e}")
-else:
-    print(f"⚠️ Service account file '{FIREBASE_CRED_PATH}' not found. Falling back to local JSON database.")
-
-
-# ============================================================
-# RUNTIME DATA
-# ============================================================
-
-creator_sessions = {}
-pending_setups = {}
-active_group_quizzes = {}
-poll_mapping = {}  # {poll_id: {"chat_id": int, "q_index": int, "correct_id": int}}
-
-
-# ============================================================
-# DATABASE FUNCTIONS (LOCAL + FIREBASE SYNC)
-# ============================================================
-
 def get_all_quizzes():
-    # Firebase Priority
-    if db_firestore:
+    if os.path.exists(DB_FILE):
         try:
-            docs = db_firestore.collection("quizzes").stream()
-            quizzes = {doc.id: doc.to_dict() for doc in docs}
-            if quizzes:
-                return quizzes
-        except Exception as e:
-            print(f"Firestore Read Error: {e}")
-
-    # Fallback to Local JSON
-    if not os.path.exists(DB_FILE):
-        return {}
-
-    try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"Database read error: {e}")
-        return {}
-
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
 
 def save_all_quizzes(data):
-    # Local JSON Save
-    temp_file = DB_FILE + ".tmp"
     try:
-        with open(temp_file, "w", encoding="utf-8") as f:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(temp_file, DB_FILE)
-    except OSError as e:
-        print(f"Database save error: {e}")
+    except Exception as e:
+        print(f"Error saving DB: {e}")
 
-    # Sync with Firebase Cloud Firestore
-    if db_firestore:
-        try:
-            for quiz_id, quiz_data in data.items():
-                db_firestore.collection("quizzes").document(quiz_id).set(quiz_data)
-            print("☁️ Firebase Firestore Sync Completed.")
-        except Exception as e:
-            print(f"Firestore Save Error: {e}")
-
-
-def save_quiz_result_firebase(quiz_id, result_data):
-    """Save student attempts and results to Firestore"""
-    if db_firestore:
-        try:
-            db_firestore.collection("results").add({
-                "quiz_id": quiz_id,
-                "timestamp": firestore.SERVER_TIMESTAMP,
-                "scores": result_data
-            })
-            print(f"📊 Results saved to Firestore for Quiz: {quiz_id}")
-        except Exception as e:
-            print(f"Firestore Result Save Error: {e}")
-
-
-# ============================================================
-# UTILS & HELPERS
-# ============================================================
+creator_sessions = {}
+active_group_quizzes = {}
+pending_setups = {}
 
 def generate_quiz_id():
     return "GGN" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-
 
 def clean_question_text(raw_text):
     if not raw_text:
         return ""
     text = str(raw_text)
-    patterns = [
-        r"\[\s*\d+\s*/\s*\d+\s*\]", r"⏱\s*\d+s?", r"\d+s\s*\|",
-        r"\[\s*\d+s\s*\]", r"\[.*?s.*?\]", r"^\s*\[\s*\d+\s*/\s*\d+\s*\]\s*",
-        r"^\s*(?:Q|q|प्रश्न)?\s*\d+[\.\)\-:]\s*", r"^\s*\[\s*\d+\s*\]\s*", r"^\s*\(\s*\d+\s*\)\s*"
-    ]
-    for pattern in patterns:
-        text = re.sub(pattern, "", text)
+    text = re.sub(r"\[\s*\d+\s*/\s*\d+\s*\]", "", text)
+    text = re.sub(r"⏱\s*\d+s?", "", text)
+    text = re.sub(r"\d+s\s*\|", "", text)
+    text = re.sub(r"\[\s*\d+s\s*\]", "", text)
+    text = re.sub(r"\[.*?s.*?\]", "", text)
+    text = re.sub(r"^\s*\[\s*\d+\s*/\s*\d+\s*\]\s*", "", text)
+    text = re.sub(r"^\s*(?:Q|q|प्रश्न)?\s*\d+[\.\)\-:]\s*", "", text)
+    text = re.sub(r"^\s*\[\s*\d+\s*\]\s*", "", text)
+    text = re.sub(r"^\s*\(\s*\d+\s*\)\s*", "", text)
     return text.strip()
 
-
-def validate_quiz(quiz):
-    questions = quiz.get("questions", [])
-    if not questions:
-        return False, "कम-से-कम 1 प्रश्न होना चाहिए।"
-
-    for number, question in enumerate(questions, 1):
-        question_text = question.get("question", "").strip()
-        options = question.get("options", [])
-        correct_id = question.get("correct_id")
-
-        if not question_text:
-            return False, f"प्रश्न {number} खाली है।"
-        if not isinstance(options, list) or not 2 <= len(options) <= 10:
-            return False, f"प्रश्न {number} में 2 से 10 options होने चाहिए।"
-        if not isinstance(correct_id, int) or correct_id < 0 or correct_id >= len(options):
-            return False, f"प्रश्न {number} का correct option invalid है।"
-
-    return True, ""
-
-
-# ============================================================
-# GMAIL BACKUP
-# ============================================================
-
-def send_quiz_email_backup(quiz_title, quiz_id, quiz_dict):
-    if not GMAIL_USER or not GMAIL_PASS:
-        print("Email backup skipped. GMAIL credentials missing.")
-        return
-
+def send_quiz_email_backup(quiz_title, quiz_id, total_q, quiz_dict):
     try:
         msg = MIMEMultipart()
-        msg["From"] = GMAIL_USER
-        msg["To"] = GMAIL_USER
-        msg["Subject"] = f"JB STUDY POINT Backup: {quiz_title} ({quiz_id})"
-
-        body = f"JB STUDY POINT\n\nQuiz Backup\n\nQuiz Title: {quiz_title}\nQuiz ID: {quiz_id}\n"
-        msg.attach(MIMEText(body, "plain", "utf-8"))
-
-        json_data = json.dumps(quiz_dict, ensure_ascii=False, indent=2).encode("utf-8")
-        attachment = MIMEApplication(json_data, _subtype="json")
-        attachment.add_header("Content-Disposition", "attachment", filename=f"{quiz_id}.json")
-        msg.attach(attachment)
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
-            server.login(GMAIL_USER, GMAIL_PASS)
+        msg['From'] = GMAIL_USER
+        msg['To'] = GMAIL_USER
+        msg['Subject'] = f"📚 Test Backup: {quiz_title} ({quiz_id})"
+        body = f"नमस्ते डॉ देव कुमार जी,\n\nटेस्ट बैकअप सुरक्षित है: {quiz_title} ({quiz_id})"
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        json_str = json.dumps(quiz_dict, ensure_ascii=False, indent=2)
+        part = MIMEText(json_str, 'plain', 'utf-8')
+        part.add_header('Content-Disposition', f'attachment; filename="{quiz_id}.json"')
+        msg.attach(part)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_USER, GMAIL_PASS.strip())
             server.send_message(msg)
-        print(f"Email backup sent successfully: {quiz_id}")
     except Exception as e:
-        print(f"Email backup error: {e}")
+        print(f"Email error: {e}")
 
+# --- WEB DASHBOARD ---
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="hi"><head><meta charset="UTF-8"><title>JB STUDY POINT - Quiz Creator</title>
+<style>
+body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
+.box { max-width: 600px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+h2 { color: #8B0000; text-align: center; }
+</style></head>
+<body><div class="box"><h2>JB STUDY POINT - Quiz Creator Web</h2><p>बॉट और वेब सर्वर सुचारू रूप से कार्य कर रहा है।</p></div></body></html>"""
 
-# ============================================================
-# FONT & PDF GENERATION
-# ============================================================
+class QuizCreatorServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(HTML_TEMPLATE.encode("utf-8"))
 
-def get_font(size):
-    if os.path.exists(FONT_PATH):
-        try:
-            return ImageFont.truetype(FONT_PATH, size)
-        except Exception as e:
-            print(f"Font loading error: {e}")
-    return ImageFont.load_default()
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
+    server.serve_forever()
 
-
+# --- PERFECT TWO-COLUMN EXAM PAPER PDF GENERATOR ---
 def generate_pdf_bytes(quiz_data):
-    PAGE_W, PAGE_H = 2480, 3508
-    MARGIN_X, COL_GAP = 140, 90
+    PAGE_W = 2480
+    PAGE_H = 3508
+    MARGIN_X = 140
+    COL_GAP = 90
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
-    f_sub, f_title = get_font(24), get_font(40)
-    f_meta, f_instr = get_font(22), get_font(20)
-    f_q, f_opt = get_font(26), get_font(24)
-    f_ans_title, f_key = get_font(50), get_font(28)
+    f_sub = ImageFont.truetype(FONT_PATH, 24)
+    f_title = ImageFont.truetype(FONT_PATH, 40)
+    f_meta = ImageFont.truetype(FONT_PATH, 22)
+    f_instr = ImageFont.truetype(FONT_PATH, 20)
+    f_q = ImageFont.truetype(FONT_PATH, 26)
+    f_opt = ImageFont.truetype(FONT_PATH, 24)
+    f_ans_title = ImageFont.truetype(FONT_PATH, 50)
+    f_key = ImageFont.truetype(FONT_PATH, 28)
 
-    title = str(quiz_data.get("title", "MOCK TEST"))
-    questions = quiz_data.get("questions", [])
+    title = str(quiz_data.get('title', 'MOCK TEST'))
+    questions = quiz_data.get('questions', [])
 
-    def wrap_text(text, font, max_width, draw):
-        words = str(text).split()
-        if not words: return [""]
-        lines, current = [], ""
-        for word in words:
-            candidate = f"{current} {word}".strip()
-            bbox = draw.textbbox((0, 0), candidate, font=font)
-            if (bbox[2] - bbox[0]) <= max_width:
-                current = candidate
+    def wrap_text(text, font, max_w, draw):
+        words = text.split()
+        lines = []
+        cur = ""
+        for w in words:
+            test = f"{cur} {w}".strip()
+            bbox = draw.textbbox((0, 0), test, font=font)
+            if (bbox[2] - bbox[0]) <= max_w:
+                cur = test
             else:
-                if current: lines.append(current)
-                current = word
-        if current: lines.append(current)
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
         return lines
 
     dummy_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFDF5")
     dummy_draw = ImageDraw.Draw(dummy_img)
-    option_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)", "(i)", "(j)"]
 
-    question_blocks, answer_keys = [], []
+    q_blocks = []
+    opt_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
+    answer_keys = []
 
-    for number, question in enumerate(questions, 1):
-        clean_q = clean_question_text(question.get("question", ""))
-        q_lines = wrap_text(f"{number}. {clean_q}", f_q, COL_W, dummy_draw)
+    for i, q in enumerate(questions, 1):
+        clean_q = clean_question_text(q.get('question', ''))
+        q_lines = wrap_text(f"{i}. {clean_q}", f_q, COL_W, dummy_draw)
+
         opt_items = []
+        for o_idx, opt in enumerate(q.get('options', [])):
+            lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
+            c_opt = clean_question_text(opt)
+            wrapped = wrap_text(f"{lbl} {c_opt}", f_opt, COL_W - 30, dummy_draw)
+            opt_items.append(wrapped)
 
-        for idx, option in enumerate(question.get("options", [])):
-            lbl = option_labels[idx] if idx < len(option_labels) else f"({idx + 1})"
-            clean_opt = clean_question_text(option)
-            opt_lines = wrap_text(f"{lbl} {clean_opt}", f_opt, COL_W - 30, dummy_draw)
-            opt_items.append(opt_lines)
+        correct_idx = q.get('correct_id', 0)
+        c_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
+        answer_keys.append((f"{i}", c_lbl))
 
-        c_id = int(question.get("correct_id", 0))
-        c_lbl = option_labels[c_id] if c_id < len(option_labels) else f"({c_id + 1})"
-        answer_keys.append((str(number), c_lbl))
-
-        tot_opt_lines = sum(len(l) for l in opt_items)
-        block_h = len(q_lines) * 40 + tot_opt_lines * 34 + 55
-        question_blocks.append({"q_lines": q_lines, "opt_items": opt_items, "block_h": block_h})
-
-    def create_page(later=False):
-        img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFDF5")
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([80, 80, PAGE_W - 80, PAGE_H - 80], outline="#8B0000", width=6)
-        draw.rectangle([95, 95, PAGE_W - 95, PAGE_H - 95], outline="#DAA520", width=3)
-        header_text = f"JB STUDY POINT | {title}" if later else "JB STUDY POINT YOUTUBE CHANNEL"
-        draw.text((120, 105), header_text, font=f_sub, fill="#8B0000")
-        draw.text((PAGE_W - 520, 105), "Mob: 8218345167", font=f_sub, fill="#000000")
-        draw.line([(PAGE_W // 2, 140), (PAGE_W // 2, PAGE_H - 140)], fill="#B0C4DE", width=3)
-        return img, draw
-
-    current_img, current_draw = create_page(False)
-    current_col, current_y = 0, 450
-    page_limit = PAGE_H - 140
-
-    current_draw.rectangle([120, 140, PAGE_W - 120, 215], fill="#8B0000")
-    t_box = current_draw.textbbox((0, 0), title, font=f_title)
-    current_draw.text(((PAGE_W - (t_box[2] - t_box[0])) // 2, 155), title, font=f_title, fill="#FFFFFF")
+        tot_opt_lines = sum(len(x) for x in opt_items)
+        block_h = (len(q_lines) * 40) + (tot_opt_lines * 34) + 30
+        q_blocks.append({
+            "q_lines": q_lines,
+            "opt_items": opt_items,
+            "block_h": block_h
+        })
 
     pages = []
-    for block in question_blocks:
-        if current_y + block["block_h"] > page_limit:
-            if current_col == 0:
-                current_col, current_y = 1, 160
-            else:
-                pages.append(current_img)
-                current_img, current_draw = create_page(True)
-                current_col, current_y = 0, 160
 
-        col_x = MARGIN_X if current_col == 0 else MARGIN_X + COL_W + COL_GAP
-        q_box_h = len(block["q_lines"]) * 40 + 10
-        current_draw.rectangle([col_x - 10, current_y - 4, col_x + COL_W + 10, current_y + q_box_h], fill="#EAE6FF", outline="#7B68EE", width=2)
+    def create_first_page():
+        img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFDF5")
+        draw = ImageDraw.Draw(img)
+
+        draw.rectangle([80, 80, PAGE_W - 80, PAGE_H - 80], outline="#8B0000", width=6)
+        draw.rectangle([95, 95, PAGE_W - 95, PAGE_H - 95], outline="#DAA520", width=3)
+        draw.text((120, 105), "JB STUDY POINT YOUTUBE CHANNEL", font=f_sub, fill="#8B0000")
+        draw.text((PAGE_W - 520, 105), "Mob: 8218345167", font=f_sub, fill="#000000")
+
+        draw.rectangle([120, 140, PAGE_W - 120, 215], fill="#8B0000", outline="#8B0000")
+        t_bbox = draw.textbbox((0, 0), title, font=f_title)
+        draw.text(((PAGE_W - (t_bbox[2] - t_bbox[0])) // 2, 155), title, font=f_title, fill="#FFFFFF")
+
+        draw.rectangle([120, 230, PAGE_W - 120, 310], outline="#444444", width=2)
+        draw.text((140, 245), "TEST NO.: 01", font=f_meta, fill="#000000")
+        draw.text((450, 245), "CANDIDATE NAME: ____________________________", font=f_meta, fill="#000000")
+        draw.text((1350, 245), "ROLL NO.: ____________________", font=f_meta, fill="#000000")
+        draw.text((1850, 245), "BOOKLET: A B C D", font=f_meta, fill="#8B0000")
+
+        draw.rectangle([120, 325, PAGE_W - 120, 420], fill="#F9F9F9", outline="#B0C4DE", width=2)
+        draw.text((140, 335), "INSTRUCTIONS / निर्देश:", font=f_meta, fill="#8B0000")
+        draw.text((140, 365), "1. इस परीक्षा पुस्तिका में सभी प्रश्न अनिवार्य हैं। प्रत्येक प्रश्न 1 अंक का है।", font=f_instr, fill="#333333")
+        draw.text((140, 390), "2. ओएमआर शीट या ऑनलाइन टेस्ट में सही विकल्प का चयन करें।", font=f_instr, fill="#333333")
+
+        mid_x = PAGE_W // 2
+        draw.line([(mid_x, 440), (mid_x, PAGE_H - 140)], fill="#B0C4DE", width=3)
+
+        txt_img = Image.new("RGBA", (PAGE_W, PAGE_H), (255, 255, 255, 0))
+        txt_draw = ImageDraw.Draw(txt_img)
+        wm_font = ImageFont.truetype(FONT_PATH, 150)
+        txt_draw.text((PAGE_W // 2 - 580, PAGE_H // 2 - 90), "JB STUDY POINT", font=wm_font, fill=(220, 180, 180, 75))
+        rotated_wm = txt_img.rotate(30, resample=Image.Resampling.BICUBIC, center=(PAGE_W // 2, PAGE_H // 2))
+        img.paste(Image.alpha_composite(img.convert("RGBA"), rotated_wm).convert("RGB"))
+
+        return img, draw
+
+    def create_later_page():
+        img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFDF5")
+        draw = ImageDraw.Draw(img)
+
+        draw.rectangle([80, 80, PAGE_W - 80, PAGE_H - 80], outline="#8B0000", width=6)
+        draw.rectangle([95, 95, PAGE_W - 95, PAGE_H - 95], outline="#DAA520", width=3)
+        mid_x = PAGE_W // 2
+        draw.line([(mid_x, 140), (mid_x, PAGE_H - 140)], fill="#B0C4DE", width=3)
+
+        draw.text((120, 105), f"JB STUDY POINT | {title}", font=f_sub, fill="#8B0000")
+        draw.text((PAGE_W - 520, 105), "Mob: 8218345167", font=f_sub, fill="#000000")
+
+        txt_img = Image.new("RGBA", (PAGE_W, PAGE_H), (255, 255, 255, 0))
+        txt_draw = ImageDraw.Draw(txt_img)
+        wm_font = ImageFont.truetype(FONT_PATH, 150)
+        txt_draw.text((PAGE_W // 2 - 580, PAGE_H // 2 - 90), "JB STUDY POINT", font=wm_font, fill=(220, 180, 180, 75))
+        rotated_wm = txt_img.rotate(30, resample=Image.Resampling.BICUBIC, center=(PAGE_W // 2, PAGE_H // 2))
+        img.paste(Image.alpha_composite(img.convert("RGBA"), rotated_wm).convert("RGB"))
+
+        return img, draw
+
+    cur_img, cur_draw = create_first_page()
+    cur_col = 0
+    cur_y = 450
+    page_limit = PAGE_H - 140
+
+    for block in q_blocks:
+        b_height = block["block_h"]
+        if cur_y + b_height > page_limit:
+            if cur_col == 0:
+                cur_col = 1
+                cur_y = 160
+            else:
+                pages.append(cur_img)
+                cur_img, cur_draw = create_later_page()
+                cur_col = 0
+                cur_y = 160
+
+        col_x = MARGIN_X if cur_col == 0 else MARGIN_X + COL_W + COL_GAP
+        q_box_h = (len(block["q_lines"]) * 40) + 8
+        cur_draw.rectangle([col_x - 10, cur_y - 4, col_x + COL_W + 10, cur_y + q_box_h], fill="#EAE6FF", outline="#7B68EE", width=2)
 
         for line in block["q_lines"]:
-            current_draw.text((col_x, current_y), line, font=f_q, fill="#000080")
-            current_y += 40
-        current_y += 6
+            cur_draw.text((col_x, cur_y), line, font=f_q, fill="#000080")
+            cur_y += 40
 
-        for opt_lines in block["opt_items"]:
-            for line in opt_lines:
-                current_draw.text((col_x + 15, current_y), line, font=f_opt, fill="#111111")
-                current_y += 34
-        current_y += 24
+        cur_y += 6
+        for item in block["opt_items"]:
+            for line in item:
+                cur_draw.text((col_x + 15, cur_y), line, font=f_opt, fill="#111111")
+                cur_y += 34
 
-    pages.append(current_img)
+        cur_y += 24
 
-    # Answer Key Page
-    ans_img, ans_draw = create_page(True)
-    ans_draw.text((800, 160), "ANSWER KEY / उत्तर तालिका", font=f_ans_title, fill="#8B0000")
-    ans_x, ans_y = MARGIN_X + 40, 310
-    col_w = (PAGE_W - (2 * MARGIN_X) - 80) // 5
+    pages.append(cur_img)
 
-    for idx, (q_num, ans_lbl) in enumerate(answer_keys):
-        c, r = idx % 5, idx // 5
-        x, y = ans_x + c * col_w, ans_y + r * 70
-        ans_draw.rectangle([x, y, x + col_w - 25, y + 55], outline="#8B0000", fill="#FFFFFF", width=2)
-        ans_draw.text((x + 12, y + 10), f"Q.{q_num}", font=f_key, fill="#000000")
-        ans_draw.text((x + col_w - 80, y + 10), ans_lbl, font=f_key, fill="#8B0000")
+    ans_img, ans_draw = create_later_page()
+    ay = 160
+    ans_draw.text(((PAGE_W - 600) // 2, ay), "ANSWER KEY / उत्तर तालिका", font=f_ans_title, fill="#8B0000")
+    ay += 70
+    sub_txt = f"{title} | Total: {len(questions)} Questions"
+    ans_draw.text(((PAGE_W - 500) // 2, ay), sub_txt, font=f_sub, fill="#333333")
+    ay += 60
+
+    cols = 5
+    usable_w = PAGE_W - (2 * MARGIN_X) - 80
+    cw = usable_w // cols
+    sx = MARGIN_X + 40
+
+    for idx, (qn, ans) in enumerate(answer_keys):
+        c = idx % cols
+        r = idx // cols
+        ix = sx + (c * cw)
+        iy = ay + (r * 65)
+        ans_draw.rectangle([ix, iy, ix + cw - 25, iy + 52], outline="#8B0000", fill="#FFFFFF", width=2)
+        ans_draw.text((ix + 12, iy + 10), f"Q.{qn}", font=f_key, fill="#000000")
+        ans_draw.text((ix + cw - 75, iy + 10), ans, font=f_key, fill="#8B0000")
 
     pages.append(ans_img)
-
     pdf_io = io.BytesIO()
-    pdf_io.name = f"{title}_Exam_Booklet.pdf"
     pages[0].save(pdf_io, format="PDF", save_all=True, append_images=pages[1:], resolution=300.0)
     pdf_io.seek(0)
     return pdf_io
 
-
-# ============================================================
-# BOT COMMANDS
-# ============================================================
-
+# --- ADVANCED BOT & GAME ENGINE ---
 async def post_init(application):
     commands = [
         BotCommand("start", "Start bot"),
         BotCommand("create", "Create quiz"),
-        BotCommand("done", "Finish quiz creation"),
-        BotCommand("cancel", "Cancel quiz creation"),
         BotCommand("myquizzes", "View quizzes"),
-        BotCommand("play", "Play quiz"),
-        BotCommand("pdf", "Download PDF"),
+        BotCommand("play", "Play quiz in group"),
+        BotCommand("pdf", "Download PDF booklet"),
         BotCommand("backup", "Email backup"),
     ]
     await application.bot.set_my_commands(commands)
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
-
-    if args and args[0].upper().startswith("PLAY_"):
-        quiz_id = args[0][5:].strip().upper()
+    if args and args[0].startswith("PLAY_"):
+        quiz_id = args[0].replace("PLAY_", "")
         await prompt_quiz_settings(update.effective_chat.id, quiz_id, user.id, context)
         return
 
-    await update.message.reply_text(
-        f"🇮🇳 नमस्ते {user.first_name}!\n\n"
-        "🎯 JB STUDY POINT Quiz Bot (Phase 3 Firebase Active)\n\n"
-        "📝 नया टेस्ट: /create\n"
-        "📚 टेस्ट सूची: /myquizzes\n"
-        "▶️ टेस्ट खेलें: /play QUIZ_ID\n"
-        "📄 PDF: /pdf QUIZ_ID\n"
-        "📧 Backup: /backup QUIZ_ID\n"
-        "🛑 Cancel: /cancel"
+    text = (
+        f"🇮🇳 *नमस्ते {user.first_name}!*\n\n"
+        "🎯 **JB STUDY POINT Quiz Bot** में आपका स्वागत है।\n\n"
+        "• नया टेस्ट बनाएँ: `/create`\n"
+        "• टेस्ट सूची देखें: `/myquizzes`\n"
+        "• ग्रुप में टेस्ट खेलें: `/play QUIZ_ID`\n"
+        "• PDF बुकलेट डाउनलोड करें: `/pdf QUIZ_ID`"
     )
-
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("⛔ यह command केवल admin के लिए है।")
+    if update.effective_user.id != ADMIN_ID:
         return
-
     if context.args:
         title = " ".join(context.args).strip()
-        quiz_id = generate_quiz_id()
-        creator_sessions[user_id] = {
-            "title": title, "questions": [], "id": quiz_id, "step": "POLLS", "creator": DEFAULT_CREATOR
-        }
-        await update.message.reply_text(
-            f"✅ Test शुरू हो गया।\n\n📝 Title: {title}\n🆔 ID: {quiz_id}\n\n"
-            "अब Telegram Quiz Polls forward करें।\nसभी questions के बाद /done भेजें।"
-        )
-        return
-
-    creator_sessions[user_id] = {"step": "TITLE"}
-    await update.message.reply_text("📝 कृपया Test का नाम भेजें:")
-
+        q_id = generate_quiz_id()
+        creator_sessions[update.effective_user.id] = {"title": title, "questions": [], "id": q_id, "step": "POLLS"}
+        await update.message.reply_text(f"✅ टेस्ट '{title}' शुरू हुआ!\n👉 अब `@QuizBot` से पोल फ़ॉरवर्ड करना शुरू करें।\nसभी प्रश्न भेजने के बाद **/done** लिखें।")
+    else:
+        creator_sessions[update.effective_user.id] = {"step": "TITLE"}
+        await update.message.reply_text("📝 कृपया इस टेस्ट का **नाम (शीर्षक)** लिखकर भेजें:")
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    session = creator_sessions.get(user_id)
-
-    if not session or session.get("step") != "TITLE":
+    if user_id not in creator_sessions:
         return
-
-    title = update.message.text.strip()
-    if not title:
-        await update.message.reply_text("❌ Test title खाली नहीं हो सकता।")
-        return
-
-    quiz_id = generate_quiz_id()
-    creator_sessions[user_id] = {
-        "title": title, "questions": [], "id": quiz_id, "step": "POLLS", "creator": DEFAULT_CREATOR
-    }
-    await update.message.reply_text(
-        f"✅ Test तैयार है।\n\n📝 {title}\n🆔 {quiz_id}\n\n"
-        "अब Quiz Polls forward करें।\nसमाप्त होने पर /done भेजें।"
-    )
-
+    session = creator_sessions[user_id]
+    if session.get("step") == "TITLE":
+        title = update.message.text.strip()
+        q_id = generate_quiz_id()
+        creator_sessions[user_id] = {"title": title, "questions": [], "id": q_id, "step": "POLLS"}
+        await update.message.reply_text(f"✅ टेस्ट का नाम तय हुआ: *'{title}'*\n👉 अब `@QuizBot` से पोल फ़ॉरवर्ड करें।\nसमाप्त होने पर **/done** भेजें।", parse_mode="Markdown")
 
 async def handle_incoming_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    session = creator_sessions.get(user_id)
-
-    if not session or session.get("step") != "POLLS":
+    if user_id not in creator_sessions or creator_sessions[user_id].get("step") != "POLLS":
         return
-
     poll = update.message.poll
-    if not poll or poll.type != "quiz":
-        await update.message.reply_text("❌ केवल Quiz Poll स्वीकार किया जाएगा।")
+    if not poll:
         return
-
-    if poll.correct_option_id is None:
-        await update.message.reply_text("❌ इस poll में correct answer नहीं मिला।")
-        return
-
     options = [opt.text for opt in poll.options]
-    question = clean_question_text(poll.question)
-
-    session["questions"].append({
-        "question": question, "options": options, "correct_id": int(poll.correct_option_id)
+    correct_id = poll.correct_option_id if poll.correct_option_id is not None else 0
+    creator_sessions[user_id]["questions"].append({
+        "question": clean_question_text(poll.question),
+        "options": options,
+        "correct_id": correct_id
     })
-    await update.message.reply_text(f"✅ Question saved: {len(session['questions'])}")
-
+    count = len(creator_sessions[user_id]["questions"])
+    await update.message.reply_text(f"✅ प्रश्न सुरक्षित ({count})")
 
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id != ADMIN_ID: return
-
-    session = creator_sessions.get(user_id)
-    if not session or session.get("step") != "POLLS":
-        await update.message.reply_text("❌ Quiz creation अभी active नहीं है।")
+    if user_id not in creator_sessions:
         return
-
-    valid, error = validate_quiz(session)
-    if not valid:
-        await update.message.reply_text(f"❌ {error}")
-        return
-
-    quiz_id = session["id"]
-    all_quizzes = get_all_quizzes()
-    all_quizzes[quiz_id] = session
-    save_all_quizzes(all_quizzes)
-
-    threading.Thread(target=send_quiz_email_backup, args=(session["title"], quiz_id, session.copy()), daemon=True).start()
+    session = creator_sessions[user_id]
+    q_id = session["id"]
+    all_q = get_all_quizzes()
+    all_q[q_id] = session
+    save_all_quizzes(all_q)
+    threading.Thread(target=send_quiz_email_backup, args=(session["title"], q_id, len(session["questions"]), session)).start()
     del creator_sessions[user_id]
 
     keyboard = [
-        [InlineKeyboardButton("▶️ Start Quiz", callback_data=f"init_{quiz_id}")],
-        [InlineKeyboardButton("📄 Download PDF", callback_data=f"pdf_{quiz_id}")]
+        [InlineKeyboardButton("▶️ Start Quiz", callback_data=f"init_{q_id}")],
+        [InlineKeyboardButton("📄 Download PDF Booklet", callback_data=f"pdf_{q_id}")]
     ]
     await update.message.reply_text(
-        f"🎉 TEST SUCCESSFULLY CREATED!\n\n📝 {session['title']}\n🆔 {quiz_id}\n"
-        f"❓ Questions: {len(session['questions'])}\n\nअब आप Quiz Start कर सकते हैं।",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"🎉 टेस्ट सफलताપूर्वक बन गया!\n🆔 ID: `{q_id}`\n📧 बैकअप ईमेल पर भेज दिया गया है।",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
     )
-
-
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in creator_sessions:
-        del creator_sessions[user_id]
-        await update.message.reply_text("🛑 Quiz creation cancel कर दिया गया।")
-
 
 async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    quizzes = get_all_quizzes()
-    if not quizzes:
-        await update.message.reply_text("📭 कोई quiz मौजूद नहीं है।")
+    if update.effective_user.id != ADMIN_ID:
         return
-
-    lines = ["📚 JB STUDY POINT QUIZZES\n"]
-    for q_id, q in quizzes.items():
-        lines.append(f"📝 {q.get('title')}\n🆔 {q_id}\n❓ Qs: {len(q.get('questions', []))}\n▶️ /play {q_id}\n📄 /pdf {q_id}\n")
-    await update.message.reply_text("\n".join(lines))
-
-
-# ============================================================
-# QUIZ EXECUTION & POLL ANSWER HANDLER
-# ============================================================
+    all_q = get_all_quizzes()
+    if not all_q:
+        await update.message.reply_text("कोई क्विज़ मौजूद नहीं है।")
+        return
+    lines = ["🧩 आपके टेस्ट्स:\n"]
+    for q_id, data in all_q.items():
+        lines.append(f"• *{data.get('title')}* (ID: `{q_id}`) — PDF: `/pdf {q_id}` | Play: `/play {q_id}`")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def prompt_quiz_settings(chat_id, quiz_id, host_id, context):
-    all_quizzes = get_all_quizzes()
-    quiz = all_quizzes.get(quiz_id)
-
-    if not quiz:
-        await context.bot.send_message(chat_id=chat_id, text="❌ Quiz नहीं मिला।")
+    all_q = get_all_quizzes()
+    if quiz_id not in all_q:
+        await context.bot.send_message(chat_id=chat_id, text="❌ क्विज़ नहीं मिला।")
         return
-
-    if chat_id in active_group_quizzes:
-        await context.bot.send_message(chat_id=chat_id, text="⚠️ इस chat में एक quiz पहले से चल रहा है।")
-        return
-
     pending_setups[chat_id] = {"quiz_id": quiz_id, "host_id": host_id, "timer": 20, "negative": 0.0}
-
     keyboard = [
-        [InlineKeyboardButton("⏱ 15 सेकंड", callback_data=f"TIME:{chat_id}:15"),
-         InlineKeyboardButton("⏱ 20 सेकंड", callback_data=f"TIME:{chat_id}:20")],
-        [InlineKeyboardButton("⏱ 25 सेकंड", callback_data=f"TIME:{chat_id}:25"),
-         InlineKeyboardButton("⏱ 30 सेकंड", callback_data=f"TIME:{chat_id}:30")]
+        [InlineKeyboardButton("⏱ 15s", callback_data=f"set_time_{chat_id}_15"), InlineKeyboardButton("⏱ 20s", callback_data=f"set_time_{chat_id}_20")],
+        [InlineKeyboardButton("⏱ 25s", callback_data=f"set_time_{chat_id}_25"), InlineKeyboardButton("⏱ 30s", callback_data=f"set_time_{chat_id}_30")]
     ]
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"⚙️ Quiz Settings\n\n📝 {quiz.get('title')}\n❓ Questions: {len(quiz.get('questions', []))}\n\n⏱ Timer चुनें:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await context.bot.send_message(chat_id=chat_id, text="⚙️ **समय (टाइमर) चुनें:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-
-async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
+    user_id = query.from_user.id
 
     if data.startswith("init_"):
-        quiz_id = data.split("_")[1]
-        await prompt_quiz_settings(query.message.chat_id, quiz_id, query.from_user.id, context)
+        quiz_id = data.replace("init_", "")
+        await prompt_quiz_settings(query.message.chat_id, quiz_id, user_id, context)
+
+    elif data.startswith("set_time_"):
+        parts = data.split("_")
+        chat_id, timer_val = int(parts[2]), int(parts[3])
+        if chat_id in pending_setups:
+            pending_setups[chat_id]["timer"] = timer_val
+            neg_keyboard = [
+                [InlineKeyboardButton("0.0 (No Negative)", callback_data=f"set_neg_{chat_id}_0"), InlineKeyboardButton("-0.33 (1/3rd)", callback_data=f"set_neg_{chat_id}_33")],
+                [InlineKeyboardButton("-0.50 (1/2)", callback_data=f"set_neg_{chat_id}_50"), InlineKeyboardButton("-0.25 (1/4th)", callback_data=f"set_neg_{chat_id}_25")]
+            ]
+            await query.edit_message_text(text=f"⏱ समय: *{timer_val}s*\n\n⚠️ **निगेटिव मार्किंग चुनें:**", reply_markup=InlineKeyboardMarkup(neg_keyboard), parse_mode="Markdown")
+
+    elif data.startswith("set_neg_"):
+        parts = data.split("_")
+        chat_id, neg_code = int(parts[2]), parts[3]
+        neg_map = {"0": 0.0, "33": 0.33, "50": 0.50, "25": 0.25}
+        neg_val = neg_map.get(neg_code, 0.0)
+        if chat_id in pending_setups:
+            pending_setups[chat_id]["negative"] = neg_val
+            setup = pending_setups[chat_id]
+            del pending_setups[chat_id]
+            await query.edit_message_text(f"✅ सेटअप पूर्ण! टेस्ट शुरू हो रहा है...")
+            await start_group_quiz(chat_id, setup["quiz_id"], setup["timer"], setup["negative"], (query.message.chat.type == "private"), context)
 
     elif data.startswith("pdf_"):
-        quiz_id = data.split("_")[1]
-        quiz = get_all_quizzes().get(quiz_id)
-        if quiz:
-            pdf_bytes = generate_pdf_bytes(quiz)
-            await query.message.reply_document(document=pdf_bytes, filename=f"{quiz_id}.pdf")
-
-    elif data.startswith("TIME:"):
-        _, chat_id_str, time_str = data.split(":")
-        c_id = int(chat_id_str)
-        if c_id in pending_setups:
-            pending_setups[c_id]["timer"] = int(time_str)
-            setup = pending_setups.pop(c_id)
-            asyncio.create_task(run_group_quiz(c_id, setup["quiz_id"], setup["timer"], context))
-
-
-async def run_group_quiz(chat_id, quiz_id, timer_sec, context):
-    quiz = get_all_quizzes().get(quiz_id)
-    if not quiz: return
-
-    active_group_quizzes[chat_id] = {"scores": {}, "quiz_id": quiz_id}
-    await context.bot.send_message(chat_id=chat_id, text=f"🚀 Quiz **{quiz['title']}** शुरू हो रहा है!\nसमय प्रति प्रश्न: {timer_sec} सेकंड।")
-
-    for idx, q in enumerate(quiz["questions"]):
-        msg = await context.bot.send_poll(
-            chat_id=chat_id,
-            question=f"[{idx+1}/{len(quiz['questions'])}] {q['question']}",
-            options=q["options"],
-            type="quiz",
-            correct_option_id=q["correct_id"],
-            is_anonymous=False,
-            open_period=timer_sec
-        )
-        poll_mapping[msg.poll.id] = {"chat_id": chat_id, "correct_id": q["correct_id"]}
-        await asyncio.sleep(timer_sec + 2)
-
-    # Leaderboard Processing
-    scores = active_group_quizzes[chat_id]["scores"]
-    del active_group_quizzes[chat_id]
-
-    # Save to Firebase
-    save_quiz_result_firebase(quiz_id, scores)
-
-    if not scores:
-        await context.bot.send_message(chat_id=chat_id, text="🏆 Quiz समाप्त! किसी छात्र ने उत्तर नहीं दिया।")
-        return
-
-    sorted_scores = sorted(scores.items(), key=lambda x: x[1]["score"], reverse=True)
-    leaderboard = [f"🏆 **LEADERBOARD: {quiz['title']}**\n"]
-
-    for rank, (u_id, data) in enumerate(sorted_scores, 1):
-        leaderboard.append(f"{rank}. {data['name']} - **{data['score']} अंक**")
-
-    await context.bot.send_message(chat_id=chat_id, text="\n".join(leaderboard), parse_mode="Markdown")
-
-
-async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    answer = update.poll_answer
-    poll_id = answer.poll_id
-
-    if poll_id not in poll_mapping:
-        return
-
-    p_data = poll_mapping[poll_id]
-    chat_id = p_data["chat_id"]
-    correct_id = p_data["correct_id"]
-
-    if chat_id not in active_group_quizzes:
-        return
-
-    user = answer.user
-    selected_option = answer.option_ids[0] if answer.option_ids else None
-
-    scores = active_group_quizzes[chat_id]["scores"]
-    if user.id not in scores:
-        scores[user.id] = {"name": user.full_name, "score": 0}
-
-    if selected_option == correct_id:
-        scores[user.id]["score"] += 1
-
-
-async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("❌ कृपया ID दर्ज करें: /pdf QUIZ_ID")
-        return
-    q_id = context.args[0].upper().strip()
-    quiz = get_all_quizzes().get(q_id)
-    if not quiz:
-        await update.message.reply_text("❌ Quiz नहीं मिला।")
-        return
-    pdf_bytes = generate_pdf_bytes(quiz)
-    await update.message.reply_document(document=pdf_bytes, filename=f"{q_id}.pdf")
-
+        quiz_id = data.replace("pdf_", "")
+        await send_quiz_pdf(query.message.chat_id, quiz_id, context)
 
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ कृपया ID दर्ज करें: /play QUIZ_ID")
+        await update.message.reply_text("❌ क्विज़ आईडी लिखें। उदाहरण: `/play GGN80C50L`")
         return
-    q_id = context.args[0].upper().strip()
-    await prompt_quiz_settings(update.effective_chat.id, q_id, update.effective_user.id, context)
+    quiz_id = context.args[0].strip().upper()
+    await prompt_quiz_settings(update.effective_chat.id, quiz_id, update.effective_user.id, context)
 
+async def send_quiz_pdf(chat_id, quiz_id, context):
+    all_q = get_all_quizzes()
+    if quiz_id not in all_q:
+        await context.bot.send_message(chat_id=chat_id, text="❌ क्विज़ नहीं मिला।")
+        return
+    await context.bot.send_message(chat_id=chat_id, text="⏳ असली परीक्षा जैसी PDF तैयार हो रही है...")
+    try:
+        buf = generate_pdf_bytes(all_q[quiz_id])
+        await context.bot.send_document(chat_id=chat_id, document=buf, filename="Exam_Booklet.pdf")
+   
+except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"त्रुटि: {e}")
 
-# ============================================================
-# MAIN APPLICATION SETUP
-# ============================================================
+async def start_group_quiz(chat_id, quiz_id, timer_sec, neg_val, is_private, context):
+    all_q = get_all_quizzes()
+    quiz = all_q[quiz_id]
+    total = len(quiz["questions"])
+    active_group_quizzes[chat_id] = {
+        "quiz_id": quiz_id, "index": 0, "timer": int(timer_sec), "negative": neg_val,
+        "is_private": is_private, "users": {}, "current_msg_id": None, "total_q": total, "timer_task": None
+    }
+    banner = f"🎯 *टेस्ट शुरू हो रहा है!*\n📝 टेस्ट: *{quiz['title']}*\n❓ कुल प्रश्न: *{total}*\n⏱ समय: *{timer_sec}s*"
+    await context.bot.send_message(chat_id=chat_id, text=banner, parse_mode="Markdown")
+    await asyncio.sleep(2)
+    await send_next_question(chat_id, context)
+
+async def auto_timer_countdown(chat_id, msg_id, duration, context):
+    try:
+        await asyncio.sleep(duration)
+        if chat_id in active_group_quizzes and active_group_quizzes[chat_id].get("current_msg_id") == msg_id:
+            try:
+                await context.bot.stop_poll(chat_id=chat_id, message_id=msg_id)
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+            await send_next_question(chat_id, context)
+    except asyncio.CancelledError:
+        pass
+
+async def send_next_question(chat_id, context):
+    if chat_id not in active_group_quizzes:
+        return
+    sess = active_group_quizzes[chat_id]
+    quiz = get_all_quizzes()[sess["quiz_id"]]
+    idx = sess["index"]
+    if idx < len(quiz["questions"]):
+        q = quiz["questions"][idx]
+        sess["index"] += 1
+        header_q = f"[{idx+1}/{len(quiz['questions'])}] ⏱ {sess['timer']}s | {q['question']}"
+        poll_msg = await context.bot.send_poll(
+            chat_id=chat_id, question=header_q[:300], options=q["options"],
+            type="quiz", correct_option_id=int(q["correct_id"]), is_anonymous=False, open_period=sess["timer"]
+        )
+        sess["current_msg_id"] = poll_msg.message_id
+        context.bot_data[poll_msg.poll.id] = (chat_id, int(q["correct_id"]), idx)
+        sess["timer_task"] = asyncio.create_task(auto_timer_countdown(chat_id, poll_msg.message_id, sess["timer"], context))
+    else:
+        await finish_quiz_and_show_ranks(chat_id, context)
+
+async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p_ans = update.poll_answer
+    poll_id = p_ans.poll_id
+    user = p_ans.user
+    if poll_id in context.bot_data:
+        chat_id, correct_id, q_idx = context.bot_data[poll_id]
+        if chat_id in active_group_quizzes:
+            sess = active_group_quizzes[chat_id]
+            uid, name = user.id, user.first_name or "Participant"
+            if uid not in sess["users"]:
+                sess["users"][uid] = {"name": name, "correct": 0, "wrong": 0, "score": 0.0}
+            if p_ans.option_ids:
+                if p_ans.option_ids[0] == correct_id:
+                    sess["users"][uid]["correct"] += 1
+                    sess["users"][uid]["score"] += 1.0
+                else:
+                    sess["users"][uid]["wrong"] += 1
+                    sess["users"][uid]["score"] -= sess["negative"]
+
+async def finish_quiz_and_show_ranks(chat_id, context):
+    if chat_id not in active_group_quizzes:
+        return
+    sess = active_group_quizzes[chat_id]
+    quiz = get_all_quizzes()[sess["quiz_id"]]
+    participants = sess["users"]
+    del active_group_quizzes[chat_id]
+
+    if not participants:
+        await context.bot.send_message(chat_id=chat_id, text=f"🏁 टेस्ट समाप्त! किसी ने उत्तर नहीं दिया।")
+        return
+
+    sorted_users = sorted(participants.items(), key=lambda x: x[1]["score"], reverse=True)
+    lines = []
+    for rank, (uid, p) in enumerate(sorted_users, 1):
+        lines.append(f"{rank}. *{p['name']}* — {max(0.0, round(p['score'], 2))}/{sess['total_q']} अंक")
+
+    final_msg = f"🏁 *टेस्ट परिणाम (Final Result)*\n📝 *{quiz['title']}*\n\n🏆 *रैंक व लीडरबोर्ड:*\n\n" + "\n".join(lines)
+    await context.bot.send_message(chat_id=chat_id, text=final_msg, parse_mode="Markdown")
+
+async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ क्विज़ आईडी लिखें। उदाहरण: `/pdf GGN80C50L`")
+        return
+    quiz_id = context.args[0].strip().upper()
+    await send_quiz_pdf(update.effective_chat.id, quiz_id, context)
 
 def main():
+    threading.Thread(target=run_web_server, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("create", create_command))
-    app.add_handler(CommandHandler("done", done_command))
-    app.add_handler(CommandHandler("cancel", cancel_command))
-    app.add_handler(CommandHandler("myquizzes", my_quizzes))
+    app.add_handler(CommandHandler.done_command if hasattr(CommandHandler, 'done_command') else CommandHandler("done", done_command)) # fixed
     app.add_handler(CommandHandler("play", play_command))
+    app.add_handler(CommandHandler("myquizzes", my_quizzes))
     app.add_handler(CommandHandler("pdf", pdf_command))
-
-    app.add_handler(CallbackQueryHandler(handle_callback_query))
-    app.add_handler(PollAnswerHandler(handle_poll_answer))
+    app.add_handler(CommandHandler("done", done_command))
     app.add_handler(MessageHandler(filters.POLL, handle_incoming_poll))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
-
-    print("🤖 JB STUDY POINT Phase 3 Bot running...")
+    app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(PollAnswerHandler(handle_poll_answer))
     app.run_polling()
 
-
-if __name__ == "__main__":
-    main()
+main() if __name__ == "__main__" else None
