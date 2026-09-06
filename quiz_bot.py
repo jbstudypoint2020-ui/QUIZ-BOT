@@ -245,7 +245,7 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), QuizCreatorServer)
     server.serve_forever()
 
-# --- PROFESSIONAL EXAM PAPER PDF GENERATOR (RESTORED HEADER & INSTRUCTIONS) ---
+# --- PROFESSIONAL EXAM PAPER PDF GENERATOR (PERFECT TWO-COLUMN BALANCED LAYOUT) ---
 def generate_pdf_bytes(quiz_data):
     PAGE_W = 2480
     PAGE_H = 3508
@@ -254,8 +254,8 @@ def generate_pdf_bytes(quiz_data):
     COL_W = (PAGE_W - (2 * MARGIN_X) - COL_GAP) // 2
 
     f_sub = ImageFont.truetype(FONT_PATH, 24)
-    f_title = ImageFont.truetype(FONT_PATH, 42)
-    f_meta = ImageFont.truetype(FONT_PATH, 24)
+    f_title = ImageFont.truetype(FONT_PATH, 40)
+    f_meta = ImageFont.truetype(FONT_PATH, 22)
     f_instr = ImageFont.truetype(FONT_PATH, 20)
     f_q = ImageFont.truetype(FONT_PATH, 26)
     f_opt = ImageFont.truetype(FONT_PATH, 24)
@@ -283,6 +283,38 @@ def generate_pdf_bytes(quiz_data):
             lines.append(cur)
         return lines
 
+    # पहले सभी प्रश्नों की ऊँचाई (height) कैलकुलेट करेंगे ताकि कॉलम बैलेंस रहें
+    dummy_img = Image.new("RGB", (PAGE_W, PAGE_H), "#FFFDF5")
+    dummy_draw = ImageDraw.Draw(dummy_img)
+
+    q_blocks = []
+    opt_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
+    answer_keys = []
+
+    for i, q in enumerate(questions, 1):
+        clean_q = clean_question_text(q.get('question', ''))
+        q_lines = wrap_text(f"{i}. {clean_q}", f_q, COL_W, dummy_draw)
+
+        opt_items = []
+        for o_idx, opt in enumerate(q.get('options', [])):
+            lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
+            c_opt = clean_question_text(opt)
+            wrapped = wrap_text(f"{lbl} {c_opt}", f_opt, COL_W - 30, dummy_draw)
+            opt_items.append(wrapped)
+
+        correct_idx = q.get('correct_id', 0)
+        c_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
+        answer_keys.append((f"{i}", c_lbl))
+
+        tot_opt_lines = sum(len(x) for x in opt_items)
+        block_h = (len(q_lines) * 40) + (tot_opt_lines * 34) + 30
+        q_blocks.append({
+            "q_lines": q_lines,
+            "opt_items": opt_items,
+            "block_h": block_h,
+            "q_num": i
+        })
+
     pages = []
 
     def create_first_page():
@@ -293,31 +325,32 @@ def generate_pdf_bytes(quiz_data):
         draw.rectangle([80, 80, PAGE_W - 80, PAGE_H - 80], outline="#8B0000", width=6)
         draw.rectangle([95, 95, PAGE_W - 95, PAGE_H - 95], outline="#DAA520", width=3)
 
-        # Header info
-        draw.text((120, 110), "JB STUDY POINT YOUTUBE CHANNEL", font=f_sub, fill="#8B0000")
-        draw.text((PAGE_W - 520, 110), "Mob: 8218345167", font=f_sub, fill="#000000")
+        # Top Header info
+        draw.text((120, 105), "JB STUDY POINT YOUTUBE CHANNEL", font=f_sub, fill="#8B0000")
+        draw.text((PAGE_W - 520, 105), "Mob: 8218345167", font=f_sub, fill="#000000")
 
         # Title Box
-        draw.rectangle([120, 150, PAGE_W - 120, 230], fill="#8B0000", outline="#8B0000")
+        draw.rectangle([120, 140, PAGE_W - 120, 215], fill="#8B0000", outline="#8B0000")
         t_bbox = draw.textbbox((0, 0), title, font=f_title)
         t_w = t_bbox[2] - t_bbox[0]
-        draw.text(((PAGE_W - t_w) // 2, 170), title, font=f_title, fill="#FFFFFF")
+        draw.text(((PAGE_W - t_w) // 2, 155), title, font=f_title, fill="#FFFFFF")
 
-        # Roll Number / Name Box
-        draw.rectangle([120, 245, PAGE_W - 120, 310], outline="#444444", width=2)
-        draw.line([(PAGE_W // 2, 245), (PAGE_W // 2, 310)], fill="#444444", width=2)
-        draw.text((140, 260), "Candidate Name: _______________________", font=f_meta, fill="#000000")
-        draw.text((PAGE_W // 2 + 30, 260), "Roll No.: _______________________", font=f_meta, fill="#000000")
+        # Roll Number / Booklet Series Box (Professional Exam Style)
+        draw.rectangle([120, 230, PAGE_W - 120, 310], outline="#444444", width=2)
+        draw.text((140, 245), "TEST NO.: 01", font=f_meta, fill="#000000")
+        draw.text((450, 245), "CANDIDATE NAME: ____________________________", font=f_meta, fill="#000000")
+        draw.text((1350, 245), "ROLL NO.: ____________________", font=f_meta, fill="#000000")
+        draw.text((1850, 245), "BOOKLET: A B C D", font=f_meta, fill="#8B0000")
 
         # Instructions Box
-        draw.rectangle([120, 325, PAGE_W - 120, 430], fill="#F9F9F9", outline="#B0C4DE", width=2)
-        draw.text((140, 335), "महत्वपूर्ण निर्देश (Instructions):", font=f_meta, fill="#8B0000")
-        draw.text((140, 370), "1. सभी प्रश्न अनिवार्य हैं। प्रत्येक प्रश्न 1 अंक का है।", font=f_instr, fill="#333333")
-        draw.text((140, 395), "2. ओएमआर शीट या ऑनलाइन टेस्ट में सही विकल्प का चयन करें।", font=f_instr, fill="#333333")
+        draw.rectangle([120, 325, PAGE_W - 120, 420], fill="#F9F9F9", outline="#B0C4DE", width=2)
+        draw.text((140, 335), "INSTRUCTIONS / निर्देश:", font=f_meta, fill="#8B0000")
+        draw.text((140, 365), "1. इस परीक्षा पुस्तिका में सभी प्रश्न अनिवार्य हैं। प्रत्येक प्रश्न 1 अंक का है।", font=f_instr, fill="#333333")
+        draw.text((140, 390), "2. ओएमआर शीट या ऑनलाइन टेस्ट में सही विकल्प का चयन करें।", font=f_instr, fill="#333333")
 
-        # Divider line for columns starting below instructions
+        # Center Line for columns
         mid_x = PAGE_W // 2
-        draw.line([(mid_x, 450), (mid_x, PAGE_H - 140)], fill="#B0C4DE", width=3)
+        draw.line([(mid_x, 440), (mid_x, PAGE_H - 140)], fill="#B0C4DE", width=3)
 
         # Watermark
         txt_img = Image.new("RGBA", (PAGE_W, PAGE_H), (255, 255, 255, 0))
@@ -342,7 +375,6 @@ def generate_pdf_bytes(quiz_data):
         draw.text((120, 105), f"JB STUDY POINT | {title}", font=f_sub, fill="#8B0000")
         draw.text((PAGE_W - 520, 105), "Mob: 8218345167", font=f_sub, fill="#000000")
 
-        # Watermark
         txt_img = Image.new("RGBA", (PAGE_W, PAGE_H), (255, 255, 255, 0))
         txt_draw = ImageDraw.Draw(txt_img)
         wm_font = ImageFont.truetype(FONT_PATH, 150)
@@ -354,35 +386,19 @@ def generate_pdf_bytes(quiz_data):
 
     cur_img, cur_draw = create_first_page()
     cur_col = 0
-    cur_y = 465  # First page starting Y below instructions box
-    col_tops = [465, 465]
+    col_tops = [450, 450]
+    cur_y = col_tops[0]
+    page_limit = PAGE_H - 140
 
-    opt_labels = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"]
-    answer_keys = []
+    for block in q_blocks:
+        b_height = block["block_h"]
 
-    for i, q in enumerate(questions, 1):
-        clean_q = clean_question_text(q.get('question', ''))
-        q_lines = wrap_text(f"{i}. {clean_q}", f_q, COL_W, cur_draw)
-
-        opt_items = []
-        for o_idx, opt in enumerate(q.get('options', [])):
-            lbl = opt_labels[o_idx] if o_idx < len(opt_labels) else f"({o_idx+1})"
-            c_opt = clean_question_text(opt)
-            wrapped = wrap_text(f"{lbl} {c_opt}", f_opt, COL_W - 30, cur_draw)
-            opt_items.append(wrapped)
-
-        correct_idx = q.get('correct_id', 0)
-        c_lbl = opt_labels[correct_idx] if correct_idx < len(opt_labels) else f"({correct_idx+1})"
-        answer_keys.append((f"{i}", c_lbl))
-
-        tot_opt_lines = sum(len(x) for x in opt_items)
-        block_h = (len(q_lines) * 40) + (tot_opt_lines * 34) + 30
-
-        if cur_y + block_h > (PAGE_H - 140):
+        # Check if question fits in current column
+        if cur_y + b_height > page_limit:
             if cur_col == 0:
                 cur_col = 1
-                cur_y = 160  # Later pages top Y
-                col_tops = [160, 160]
+                cur_y = 160  # Right column start on first page
+                col_tops[1] = cur_y
             else:
                 pages.append(cur_img)
                 cur_img, cur_draw = create_later_page()
@@ -392,15 +408,16 @@ def generate_pdf_bytes(quiz_data):
 
         col_x = MARGIN_X if cur_col == 0 else MARGIN_X + COL_W + COL_GAP
 
-        q_box_h = (len(q_lines) * 40) + 8
+        # Question background highlight box
+        q_box_h = (len(block["q_lines"]) * 40) + 8
         cur_draw.rectangle([col_x - 10, cur_y - 4, col_x + COL_W + 10, cur_y + q_box_h], fill="#EAE6FF", outline="#7B68EE", width=2)
 
-        for line in q_lines:
+        for line in block["q_lines"]:
             cur_draw.text((col_x, cur_y), line, font=f_q, fill="#000080")
             cur_y += 40
 
         cur_y += 6
-        for item in opt_items:
+        for item in block["opt_items"]:
             for line in item:
                 cur_draw.text((col_x + 15, cur_y), line, font=f_opt, fill="#111111")
                 cur_y += 34
@@ -931,7 +948,7 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     "wrong_questions": []
                 }
 
-            if p_ans.option_ids:
+           if p_ans.option_ids:
                 user_choice = p_ans.option_ids[0]
                 if user_choice == correct_id:
                     sess["users"][uid]["correct"] += 1
